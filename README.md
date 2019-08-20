@@ -1,5 +1,7 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges
+Live Bitcoin chart averaging data from multiple exchanges (v0.1.0)
+
+It's rough right now, but it works
 
 ## Usage
 `python LiveBtcTracker.py [options]` (use --help for info on options)
