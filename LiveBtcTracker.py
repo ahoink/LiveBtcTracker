@@ -43,6 +43,16 @@ def retrieveData():
         time.sleep(max(0.01, 1-(tf-ti)))
     print("Ending data retrieval thread...")
 
+def filterDupes(data):
+    filtered = []
+    lastT = 0
+    for d in data:
+        if lastT == d[0]:
+            continue
+        lastT = d[0]
+        filtered.append(d)
+    return filtered
+
 def main():
     global run
     global lastBfx
@@ -50,7 +60,7 @@ def main():
     global exchanges
     
     # Create chart object that controls all matplotlib related functionality
-    chart = CandlestickChart(numInts, useCBP=useCBP)
+    chart = CandlestickChart(useCBP=useCBP)
     chart.setVolBreakdown(volBrkDwn)
     chart.show()
 
@@ -67,6 +77,8 @@ def main():
             exit()
         if exchanges[i] == "binance":
             temp = temp[::-1] # binance returns old->new, so reverse it
+        elif exchanges[i] == "gemini":
+            temp = filterDupes(temp) # gemini duplicates timestamps during downtime
         candleData.append(temp)
     lastBfx = time.time()
 
@@ -88,9 +100,7 @@ def main():
 
     # Mark the highest and lowest prices levels in the current window
     maxHi = chart.getHighestPrice()
-    chart.updateHiLevel(maxHi)
     minLo = chart.getLowestPrice()
-    chart.updateLoLevel(minLo)
 
     # Start separate thread for API calls (they're slow)
     thrd = threading.Thread(target=retrieveData, args=())
@@ -148,18 +158,21 @@ def main():
         tempHi = chart.getHighestPrice()
         tempLo = chart.getLowestPrice()
         if tempHi > maxHi:
-            chart.updateHiLevel(tempHi)
+            chart.updateHiLevel()
             maxHi = tempHi
         if tempLo < minLo:
-            chart.updateLoLevel(tempLo)
+            chart.updateLoLevel()
             minLo = tempLo
 
         try:
+            #tt = time.time()
             chart.refresh()
+            #ttt = time.time()
+            #print(ttt - tt)
         except:
             break
         #print(time.time() - t1)
-        time.sleep(0.01)
+        #time.sleep(0.01)
 
     # End data thread and join with main
     run = False
@@ -171,17 +184,17 @@ if __name__ == "__main__":
     print("Initializing...\n")
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--interval", help="Time interval to track (exchange APIs only allow specific intervals)", required=False, default="1h")
-    parser.add_argument("-n", "--num_intervals", help="The max number of time intervals to display in the window (must be greater than history)", required=False, type=int, default=16)
+    #parser.add_argument("-n", "--num_intervals", help="The max number of time intervals to display in the window (must be greater than history)", required=False, type=int, default=16)
     parser.add_argument("-V", "--vol_breakdown", help="Use if volume bars should be broken down by exchange", action="store_true")
-    parser.add_argument("-y", "--history", help="How many time intervals of history to load at start (must be less than num_intervals)", required=False, type=int, default=8)
+    #parser.add_argument("-y", "--history", help="How many time intervals of history to load at start (must be less than num_intervals)", required=False, type=int, default=8)
     args = vars(parser.parse_args())
 
 
     # CONTROL PARAMETERS
-    hist = args["history"]              # Intervals of history to start with
+    #hist = args["history"]              # Intervals of history to start with
     volBrkDwn = args["vol_breakdown"]   # Breakdown volume by exchange
     interval = args["interval"]         # Time interval to watch
-    numInts = args["num_intervals"]     # Number of intervals to fit in the window
+    #numInts = args["num_intervals"]     # Number of intervals to fit in the window
 
     exchanges = ["binance", "okex", "bitfinex", "gemini", "coinbasepro"] # Binance must be first, CBP must be last
     numEx = len(exchanges)
@@ -189,12 +202,12 @@ if __name__ == "__main__":
     legend = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]
 
     # arg checks
-    if (hist > 200):
-        print("WARNING: Preloading history is limited to 200 intervals")
-        hist = 200
-    if (hist > numInts):
-        print("WARNING: number of history intervals (%d) is greater than max number of intervals (%d)" % (hist, numInts))
-        hist = numInts
+    #if (hist > 200):
+    #    print("WARNING: Preloading history is limited to 200 intervals")
+    #    hist = 200
+    #if (hist > numInts):
+    #    print("WARNING: number of history intervals (%d) is greater than max number of intervals (%d)" % (hist, numInts))
+    #    hist = numInts
     if not api.validInterval("binance", interval):
         print("WARNING: %s is not a valid interval" % interval)
         print("\tDefaulting to 1h")
@@ -210,7 +223,7 @@ if __name__ == "__main__":
             numEx -= 1
     useCBP = ("coinbasepro" in exchanges)
 
-
+    hist = 100
 
 
 
@@ -233,8 +246,8 @@ if __name__ == "__main__":
     # ---------- Print info ---------- #
     print("Tracking %d exchanges on the %s interval" % (numEx, interval))
     print("Data sources: ", exchanges)
-    print("Starting with %d intervals of history" % hist)
-    print("Limiting window to %d intervals" % numInts)
+    #print("Starting with %d intervals of history" % hist)
+    #print("Limiting window to %d intervals" % numInts)
     print("Break down volume bars by exchange: %s" % str(volBrkDwn))
     print("24 hour volume: %f BTC" % totVol)
     print("\tBitfinex: %d" % float(bfxStats[0]["volume"]))
