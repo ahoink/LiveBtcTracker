@@ -168,6 +168,9 @@ class CandlestickChart():
                                    minLo,
                                    "%.2f" % minLo,
                                    fontsize=9)
+        
+        buf = (maxHi - minLo) * 0.12
+        self.axes[0].set_ylim(minLo - buf, maxHi + buf)
 
     def _initVolBars(self):
         self.volBars.append(self.axes[1].bar(
