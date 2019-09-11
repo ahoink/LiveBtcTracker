@@ -4,6 +4,7 @@ import warnings
 # Hide MatplotlibDeprecationWarning
 warnings.filterwarnings("ignore",".*GUI is implemented.*")
 warnings.filterwarnings("ignore",".*mpl_finance*")
+from matplotlib import rcParams as rcparams
 import matplotlib.pyplot as plt
 from matplotlib.finance import candlestick_ohlc as candle
 import matplotlib.lines as mlines
@@ -12,6 +13,7 @@ import matplotlib.patches as mpatches
 class CandlestickChart():
 
     def __init__(self, numPlots=3, useCBP=True):
+        rcparams["toolbar"] = "None"
         #self.fig, self.axes = plt.subplots(numPlots,1, sharex=True)
         self.fig = plt.figure()
         # Initialize subplots and connect event handlers
@@ -23,6 +25,8 @@ class CandlestickChart():
         self.axes[0].title.set_text("Loading...")
         self.fig.canvas.mpl_connect("close_event", self._handleClose)
         self.fig.canvas.mpl_connect("scroll_event", self._handleScroll)
+        self.fig.canvas.mpl_connect("button_press_event", self._mouseClick)
+        self.fig.canvas.mpl_connect("button_release_event", self._mouseRelease)
 
         # Cursor
         self.cursor = mlines.Line2D([-1, -1], [0, 100000], linewidth=1, color="#6e6e6e")
@@ -76,6 +80,8 @@ class CandlestickChart():
         self.loaded = False
         self.useCBP = useCBP
         self.xlims = [100 - 16, 100 + 16]
+        self.pan = False
+        self.lastMouseX = 0
 
         # volume default attributes
         self.axes[1].set_ylabel("Volume (BTC)")
@@ -100,15 +106,26 @@ class CandlestickChart():
 
     def _handleScroll(self, event):
         dx = +1 if event.button == "up" else -1
-        for ax in self.axes:
+        dx = dx * min(3, int((self.xlims[1] - self.xlims[0]) / 20))
+        while abs(dx) > 0:
             if -1 <= self.xlims[0] + dx < self.currInt - 1:
                 self.xlims = [self.xlims[0] + dx, self.xlims[1]]
-                ax.set_xlim(self.xlims)
+                for ax in self.axes:
+                    ax.set_xlim(self.xlims)
                 self.updateHiLevel()
                 self.updateLoLevel()
+            dx = dx + 1 if dx < 0 else dx - 1
+
+    def _mouseClick(self, event):
+        self.pan = True
+        self.lastMouseX = event.x
+
+    def _mouseRelease(self, event):
+        self.pan = False
 
     def _mouseEnter(self, event):
         self.cursorOn = True
+        self.pan = False
 
     def _mouseLeave(self, event):
         self.cursorOn = False
@@ -116,9 +133,12 @@ class CandlestickChart():
         self.cursorText1.set_text("")
         self.cursor.set_xdata([-1, -1])
         self.cursor1.set_xdata([-1, -1])
+
+        self.pan = False
     
     def _mouseMove(self, event):
-        if self.cursorOn and self.loaded:
+        if not self.loaded: return
+        if self.cursorOn:
             x = int(round(event.xdata))
             if 0 <= x <= self.currInt:
                 cx = x
@@ -128,6 +148,16 @@ class CandlestickChart():
             self.cursor1.set_xdata([cx, cx])
             self.cursor1.set_ydata([0, max(self.vol[0])*1.1])
             self._updateCursorText(x)
+        if self.pan:
+            dx = (event.x - self.lastMouseX) / (self.xlims[1] - self.xlims[0])
+            dx = int(dx + 1) if dx > 0 else int(dx - 1)
+            if -1 <= self.xlims[0]-dx < self.currInt-1: 
+                self.xlims = [int(round(self.xlims[0]-dx)), int(round(self.xlims[1]-dx))]
+                for ax in self.axes:
+                    ax.set_xlim(self.xlims)
+                self.lastMouseX = event.x
+                self.updateHiLevel()
+                self.updateLoLevel()
             
 
     def _updateCursorText(self, x):
@@ -168,11 +198,12 @@ class CandlestickChart():
                                    minLo,
                                    "%.2f" % minLo,
                                    fontsize=9)
-        
+
         buf = (maxHi - minLo) * 0.12
         self.axes[0].set_ylim(minLo - buf, maxHi + buf)
 
     def _initVolBars(self):
+        numEx = len(self.vol)
         self.volBars.append(self.axes[1].bar(
                     range(self.currInt-len(self.vol[0])+1,self.currInt+1),
                     self.vol[0],
@@ -260,7 +291,8 @@ class CandlestickChart():
         #   price ema12 and ema26
         #   macd signal ema9
         #   volume emaX (x specified in __init__)
-        self.calcEMAfromHist(data, histCnt)
+        if self.useCBP: self.calcEMAfromHist(data[:-1], histCnt)
+        else: self.calcEMAfromHist(data, histCnt)
 
         exDown = [False]*numEx
         # traverse history from old to new data
@@ -316,13 +348,15 @@ class CandlestickChart():
             self.ema9 = (self.ema12-self.ema26) * self.ema9Wt + self.ema9 * (1-self.ema9Wt)
             self.macd.append((self.ema12-self.ema26) - self.ema9)
 
+        if len(self.ohlc) < 100:
+            self.xlims = [len(self.ohlc) - 16, len(self.ohlc) + 16]
+            for ax in self.axes:
+                ax.set_xlim(self.xlims)
         self.currInt = histCnt - 1
         self.drawCandlesticks()
         self._initHiLoLevels()
         self._initVolBars()
         self._initMACD()
-        #self.drawVolBars()
-        #self.drawMACD()
         self.loaded = True
         return exDown
 
@@ -337,15 +371,15 @@ class CandlestickChart():
         for i in range(26):
             # price ema26
             idx = ema26Start-1-i
-            self.ema26 += sum([float(x[idx][4]) for x in data[:-1]]) / (numEx-1)
+            self.ema26 += sum([float(x[idx][4]) for x in data]) / numEx
             # price ema12
             if i < 12:
                 idx = ema12Start-1-i
-                self.ema12 += sum([float(x[idx][4]) for x in data[:-1]]) / (numEx-1)
+                self.ema12 += sum([float(x[idx][4]) for x in data]) / numEx
             # volume ema
             if i < self.volEmaPd:
                 idx = emaVolStart-1-i
-                totalVol = sum([float(x[idx][5]) for x in data[:-1]])
+                totalVol = sum([float(x[idx][5]) for x in data])
                 if len(data[0][idx]) < 10:
                     self.buyEma[0] += totalVol * 0.5
                     self.sellEma[0] += totalVol * 0.5
@@ -361,7 +395,7 @@ class CandlestickChart():
         # calculate SMA9 of (ema12-ema26)
         for i in range(8,0,-1):
             idx = histCnt+i
-            p = sum([float(x[idx][4]) for x in data[:-1]]) / (numEx-1)
+            p = sum([float(x[idx][4]) for x in data]) / numEx
             self.ema26 = p * self.ema26Wt + self.ema26 * (1 - self.ema26Wt)
             self.ema12 = p * self.ema12Wt + self.ema12 * (1 - self.ema12Wt)
             self.ema9 += (self.ema12 - self.ema26)
@@ -456,7 +490,7 @@ class CandlestickChart():
                 
             # Update y-axis limits to be just above the max volume
             startIdx = max(0, self.xlims[0])
-            maxVol = max(self.vol[0][startIdx:])
+            maxVol = max(self.vol[0][startIdx:self.xlims[1]])
             self.axes[1].set_ylim(0, maxVol*1.06)
 
             # Draw EMA lines of buy and sell volume
@@ -497,8 +531,8 @@ class CandlestickChart():
             else:
                 self.macdBars[self.currInt].set_color(self.green)
 
-            maxMacd = max(self.macd[max(0, self.xlims[0]):])
-            minMacd = min(self.macd[max(0, self.xlims[0]):])
+            maxMacd = max(self.macd[max(0, self.xlims[0]):self.xlims[1]])
+            minMacd = min(self.macd[max(0, self.xlims[0]):self.xlims[1]])
             buf = (maxMacd - minMacd) * 0.12
             self.axes[2].set_ylim(min(0, minMacd - buf), max(0, maxMacd+buf))
         except Exception as e:
