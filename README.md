@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.3.0)
+Live Bitcoin chart averaging data from multiple exchanges (v0.4.0)
 
 It's rough right now, but it works
 
@@ -26,7 +26,9 @@ All price information (open, high, low, close) is averaged between all data sour
 
 Volume information is the sum of all exchanges. Buy volume percentages are based only on Binance as they are they only exchange whose API provides this information. Volume bars are colored based on the percentage of buys during that interval, NOT the price action. (i.e. green bars mean more buys than sells)
 
-MACD histogram is calculated using the averaged price data.
+### Technical Indicators
+* MACD
+* RSI
 
 ## Example
 ![Example Image of Chart](chartexample.png)
