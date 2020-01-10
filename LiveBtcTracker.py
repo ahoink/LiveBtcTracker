@@ -36,7 +36,7 @@ def retrieveData():
             else:
                 failures[i] = 0
                 candleData[i] = temp
-            if exchanges[i] == "bitfinex": lastBfx = time.time()     
+            if exchanges[i] == "bitfinex": lastBfx = time.time()
 
         if 3 in failures:
             exchanges = [ex for ex,f in zip(exchanges, failures) if f < 3]
@@ -169,7 +169,7 @@ def main():
         if t1 - (t1%granularity) > t:
             t = t1 - (t1%granularity)
             chart.incCurrIntvl()
-
+        
         # Coinbase doesn't update in realtime (every 3-5 minutes)
         if useCBP:
             if candleData[-1][0][0] < t:
@@ -197,19 +197,11 @@ def main():
             price = sum([float(x[0][4]) for x in candleData]) / numEx
         chart.setTitle("$%.2f (%s)" % (price, interval))
 
-        # update bar graph
-        chart.updateCurrentVol(candleData)
-        chart.drawVolBars()
-
-        # update price chart
-        chart.updateCandlesticks(candleData)
-        chart.drawCandlesticks()
-
-        # update MACD
-        chart.updateMACD()
-        chart.drawMACD()        
+        # update all charts with the newest data
+        chart.update(candleData)     
         
         # Mark highest and lowest wicks
+        # TODO: this doesn't actually work anymore with shifting windows
         tempHi = chart.getHighestPrice()
         tempLo = chart.getLowestPrice()
         if tempHi > maxHi:

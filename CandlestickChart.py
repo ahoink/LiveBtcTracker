@@ -4,11 +4,15 @@ import warnings
 # Hide MatplotlibDeprecationWarning
 warnings.filterwarnings("ignore",".*GUI is implemented.*")
 warnings.filterwarnings("ignore",".*mpl_finance*")
+
 from matplotlib import rcParams as rcparams
 import matplotlib.pyplot as plt
 from matplotlib.finance import candlestick_ohlc as candle
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
+
+from Indicators import MACD
+from Indicators import RSI
 
 class CandlestickChart():
 
@@ -16,11 +20,16 @@ class CandlestickChart():
         rcparams["toolbar"] = "None"
         #self.fig, self.axes = plt.subplots(numPlots,1, sharex=True)
         self.fig = plt.figure()
-        # Initialize subplots and connect event handlers
-        self.axes = [plt.subplot2grid((6,1),(0,0), rowspan=3)]
-        self.axes.append(plt.subplot2grid((6,1),(3,0), rowspan=2, sharex=self.axes[0]))
-        self.axes.append(plt.subplot2grid((6,1),(5,0), sharex=self.axes[0]))
-        self.fig.set_size_inches(8, 6)
+        # Initialize subplots for price and volume charts
+        numIndicators = 2
+        self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
+        self.axes.append(plt.subplot2grid((5+numIndicators,1),(3,0), rowspan=2, sharex=self.axes[0]))
+        # add subplot axes for indicators (1 rowspan per indicator)
+        self.axes.append(plt.subplot2grid((5+numIndicators,1),(5,0), sharex=self.axes[0]))
+        self.axes.append(plt.subplot2grid((5+numIndicators,1),(6,0), sharex=self.axes[0]))
+
+        # configure figure size/layout and connect event handlers
+        self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1-inch per indicator
         plt.subplots_adjust(top=0.95, bottom=0.05, wspace=0, hspace=0.05)
         self.axes[0].title.set_text("Loading...")
         self.fig.canvas.mpl_connect("close_event", self._handleClose)
@@ -62,16 +71,6 @@ class CandlestickChart():
         self.loLine = None
         self.loText = None
 
-        # MACD vars
-        self.macdBars = []
-        self.macd = []
-        self.ema26 = 0
-        self.ema12 = 0
-        self.ema9 = 0
-        self.ema26Wt = 2 / (26+1)
-        self.ema12Wt = 2 / (12+1)
-        self.ema9Wt = 2 / (9+1)
-
         # misc vars
         self.currInt = 0
         self.green = "#22d615"
@@ -82,6 +81,11 @@ class CandlestickChart():
         self.xlims = [100 - 16, 100 + 16]
         self.pan = False
         self.lastMouseX = 0
+        self.backgrounds = None
+
+        # indicators
+        self.macd = MACD(self.axes[2], self.xlims)
+        self.rsi = RSI(self.axes[3], self.xlims)
 
         # volume default attributes
         self.axes[1].set_ylabel("Volume (BTC)")
@@ -92,10 +96,7 @@ class CandlestickChart():
         self.axes[0].yaxis.grid(which="major", linestyle="--", color="#5e5e5e")
         self.axes[0].set_facecolor("#1e1e1e")
 
-        # MACD default attributes
-        self.axes[2].set_facecolor("#1e1e1e")
-        self.axes[2].set_ylabel("MACD (12, 26, 9)")
-
+        # set axis limits (also affects indicators)
         for ax in self.axes:
             ax.set_xticklabels([])
             ax.set_xlim(self.xlims)
@@ -105,8 +106,10 @@ class CandlestickChart():
         pass
 
     def _handleScroll(self, event):
-        dx = +1 if event.button == "up" else -1
-        dx = dx * min(3, int((self.xlims[1] - self.xlims[0]) / 20))
+        #dx = +1 if event.button == "up" else -1
+        #print(event.step)
+        #dx = dx * min(3, int((self.xlims[1] - self.xlims[0]) / 20))
+        dx = int(event.step)
         while abs(dx) > 0:
             if -1 <= self.xlims[0] + dx < self.currInt - 1:
                 self.xlims = [self.xlims[0] + dx, self.xlims[1]]
@@ -114,6 +117,7 @@ class CandlestickChart():
                     ax.set_xlim(self.xlims)
                 self.updateHiLevel()
                 self.updateLoLevel()
+                break
             dx = dx + 1 if dx < 0 else dx - 1
 
     def _mouseClick(self, event):
@@ -140,17 +144,19 @@ class CandlestickChart():
         if not self.loaded: return
         if self.cursorOn:
             x = int(round(event.xdata))
-            if 0 <= x <= self.currInt:
-                cx = x
-            else:
-                cx = event.xdata
+            # cursor is within bounds of candlestick data
+            # round to nearest interval
+            if 0 <= x <= self.currInt: cx = x
+            else: cx = event.xdata
             self.cursor.set_xdata([cx, cx])
             self.cursor1.set_xdata([cx, cx])
             self.cursor1.set_ydata([0, max(self.vol[0])*1.1])
             self._updateCursorText(x)
         if self.pan:
-            dx = (event.x - self.lastMouseX) / (self.xlims[1] - self.xlims[0])
-            dx = int(dx + 1) if dx > 0 else int(dx - 1)
+            w = (self.fig.get_size_inches()*self.fig.dpi)[0] * 0.774
+            dx = (event.x - self.lastMouseX) * (self.xlims[1] - self.xlims[0]) / w
+            #dx = int(dx + 1) if dx > 0 else int(dx - 1)
+            if abs(dx) < 1: return
             if -1 <= self.xlims[0]-dx < self.currInt-1: 
                 self.xlims = [int(round(self.xlims[0]-dx)), int(round(self.xlims[1]-dx))]
                 for ax in self.axes:
@@ -246,15 +252,6 @@ class CandlestickChart():
             range(self.currInt+1), self.sellEma[1:], "-", c="yellow", linewidth=0.9)
 
         self.volRatioText = self.axes[1].text(0, 0, "", fontsize=9, color="#cecece")
-        
-    def _initMACD(self):
-        self.macdBars = self.axes[2].bar(range(self.currInt-len(self.macd)+1,self.currInt+1), self.macd).patches
-        for bar,v in zip(self.macdBars, self.macd):
-            bar.set_height(v)
-            if v < 0:
-                bar.set_color(self.red)
-            else:
-                bar.set_color(self.green)
 
 
     # ----- MPL Figure attribute functions ----- #
@@ -287,14 +284,18 @@ class CandlestickChart():
         self.buyEma = [0]
         self.sellEma = [0]
 
-        # calc EMA from history
-        #   price ema12 and ema26
-        #   macd signal ema9
-        #   volume emaX (x specified in __init__)
+        # calc volume EMAs from history
         if self.useCBP: self.calcEMAfromHist(data[:-1], histCnt)
         else: self.calcEMAfromHist(data, histCnt)
 
         exDown = [False]*numEx
+        # shift data when needed if exchange was down (to reallign)
+        for i in range(histCnt):
+            avgT = sum([x[i][0] for x in data]) / numEx
+            for j in range(numEx):
+                if data[j][i][0] < avgT:
+                    data[j] = data[j][:i] + [[0]*6] + data[j][i:]
+                    
         # traverse history from old to new data
         for i in range(histCnt):
             # candle data is sorted new->old
@@ -338,16 +339,8 @@ class CandlestickChart():
                     sum([float(x[idx][j]) for x in data if x not in invalid]) /\
                     (len(data)-len(invalid))
 
-            # update EMAs
-            if idx == 0:
-                self.macd.append(0)
-                # skip emas if idx=0 since the current interval is updated with temp variables
-                continue
-            self.ema26 = self.ohlc[i][4] * self.ema26Wt + self.ema26 * (1-self.ema26Wt)
-            self.ema12 = self.ohlc[i][4] * self.ema12Wt + self.ema12 * (1-self.ema12Wt)
-            self.ema9 = (self.ema12-self.ema26) * self.ema9Wt + self.ema9 * (1-self.ema9Wt)
-            self.macd.append((self.ema12-self.ema26) - self.ema9)
 
+        # initialize chart objects
         if len(self.ohlc) < 100:
             self.xlims = [len(self.ohlc) - 16, len(self.ohlc) + 16]
             for ax in self.axes:
@@ -356,55 +349,51 @@ class CandlestickChart():
         self.drawCandlesticks()
         self._initHiLoLevels()
         self._initVolBars()
-        self._initMACD()
+
+        # Load history for indicators
+        if self.useCBP:
+            self.macd.loadHistory(self.ohlc, data[:-1], histCnt)
+            self.rsi.loadHistory(self.ohlc, data[:-1], histCnt)
+        else:
+            self.macd.loadHistory(self.ohlc, data, histCnt)
+            self.rsi.loadHistory(self.ohlc, data, histCnt)
+        
+        self.macd.initPlot(self.currInt)
+        self.rsi.initPlot(self.currInt)
+
+        #self.fig.canvas.draw()
+        #self.backgrounds = [self.fig.canvas.copy_from_bbox(ax.bbox) for ax in self.axes]
+
         self.loaded = True
         return exDown
 
     def calcEMAfromHist(self, data, histCnt):
         numEx = len(data)
-        ema26Start = min(200, histCnt + 26+9)
-        ema12Start = min(ema26Start - 14, histCnt + 12+9)
         emaVolStart = min(200, histCnt + self.volEmaPd)
         
         # First EMA value is a SMA
         # calculate SMA for first X intervals of emaX
-        for i in range(26):
-            # price ema26
-            idx = ema26Start-1-i
-            self.ema26 += sum([float(x[idx][4]) for x in data]) / numEx
-            # price ema12
-            if i < 12:
-                idx = ema12Start-1-i
-                self.ema12 += sum([float(x[idx][4]) for x in data]) / numEx
-            # volume ema
-            if i < self.volEmaPd:
-                idx = emaVolStart-1-i
-                totalVol = sum([float(x[idx][5]) for x in data])
-                if len(data[0][idx]) < 10:
-                    self.buyEma[0] += totalVol * 0.5
-                    self.sellEma[0] += totalVol * 0.5
-                else:
-                    self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
-                    self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
-        self.ema26 /= 26
-        self.ema12 /= 12
-        self.ema9 += (self.ema12 - self.ema26)
+        for i in range(self.volEmaPd):
+            idx = emaVolStart-1-i
+            totalVol = sum([float(x[idx][5]) for x in data])
+            if len(data[0][idx]) < 10:
+                self.buyEma[0] += totalVol * 0.5
+                self.sellEma[0] += totalVol * 0.5
+            else:
+                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
+                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
+
         self.buyEma[0] /= self.volEmaPd
         self.sellEma[0] /= self.volEmaPd
-
-        # calculate SMA9 of (ema12-ema26)
-        for i in range(8,0,-1):
-            idx = histCnt+i
-            p = sum([float(x[idx][4]) for x in data]) / numEx
-            self.ema26 = p * self.ema26Wt + self.ema26 * (1 - self.ema26Wt)
-            self.ema12 = p * self.ema12Wt + self.ema12 * (1 - self.ema12Wt)
-            self.ema9 += (self.ema12 - self.ema26)
-        self.ema9 /= 9
 
 
     # ----- Everything Else --- #
     def incCurrIntvl(self):
-        self.updateMACD(retain=False)
+        # update indicators
+        self.macd.update(self.ohlc, self.currInt, retain=False)
+        self.rsi.update(self.ohlc, self.currInt, retain=False)
+
+        # update chart limits
         self.currInt += 1
         if self.currInt >= self.xlims[1]-1:
             self.xlims = [self.xlims[0]+1, self.xlims[1]+1]
@@ -412,21 +401,18 @@ class CandlestickChart():
                 ax.set_xlim(self.xlims)
             self.updateHiLevel()
             self.updateLoLevel()
-                
+
+        # update candlestick chart
         self.ohlc.append([self.currInt] + [0]*4)
         self.createCandlestick()
-        
+
+        # update volume chart
         for v in self.vol:
             v.append(0)
         self.volRatio.append(0)
         self.createBar(axis=1)
         self.buyEma.append(0)
-        self.sellEma.append(0)
-
-        self.macd.append(0)
-        self.createBar(axis=2)
-
-
+        self.sellEma.append(0)        
 
     # Volume related functions
     def setVol(self, ex, intvl, val):
@@ -460,9 +446,6 @@ class CandlestickChart():
             for i in range(len(self.volBars)):
                 self.volBars[i].append(mpatches.Rectangle((self.currInt - 0.4, 0), width=0.8, height=0))
                 self.axes[axis].add_patch(self.volBars[i][-1])
-        elif axis == 2:
-            self.macdBars.append(mpatches.Rectangle((self.currInt - 0.4, 0), width=0.8, height=0))
-            self.axes[axis].add_patch(self.macdBars[-1])
 
     def drawVolBars(self):
         try:
@@ -511,32 +494,16 @@ class CandlestickChart():
 
 
 
-    # MACD functions
-    def updateMACD(self, retain=True):
-        tempEMA26 = self.ohlc[self.currInt][4] * self.ema26Wt + self.ema26 * (1 - self.ema26Wt)
-        tempEMA12 = self.ohlc[self.currInt][4] * self.ema12Wt + self.ema12 * (1 - self.ema12Wt)
-        tempEMA9 = (tempEMA12 - tempEMA26) * self.ema9Wt + self.ema9 * (1 - self.ema9Wt)
-        self.macd[self.currInt] = (tempEMA12 - tempEMA26) - tempEMA9
-
-        if not retain:
-            self.ema26 = tempEMA26
-            self.ema12 = tempEMA12
-            self.ema9 = tempEMA9
+    # Indicator functions
+    def updateIndicators(self, retain=True):
+        self.macd.update(self.ohlc, self.currInt, retain)
+        self.rsi.update(self.ohlc, self.currInt, retain)
         
-    def drawMACD(self):
-        try:
-            self.macdBars[self.currInt].set_height(self.macd[self.currInt])
-            if self.macd[self.currInt] < 0:
-                self.macdBars[self.currInt].set_color(self.red)
-            else:
-                self.macdBars[self.currInt].set_color(self.green)
-
-            maxMacd = max(self.macd[max(0, self.xlims[0]):self.xlims[1]])
-            minMacd = min(self.macd[max(0, self.xlims[0]):self.xlims[1]])
-            buf = (maxMacd - minMacd) * 0.12
-            self.axes[2].set_ylim(min(0, minMacd - buf), max(0, maxMacd+buf))
-        except Exception as e:
-            print("Could not draw MACD:", e)
+    def drawIndicators(self):
+        self.macd.xlims = self.xlims
+        self.macd.draw(self.currInt)
+        self.rsi.xlims = self.xlims
+        self.rsi.draw(self.currInt)
 
 
 
@@ -556,6 +523,7 @@ class CandlestickChart():
     def drawCandlesticks(self):
         try:
             if self.candlesticks[0]:
+                #self.fig.canvas.restore_region(self.backgrounds[0])
                 self.candlesticks[0][-1].set_ydata([self.ohlc[-1][2], self.ohlc[-1][3]])
                 # open > close
                 if self.ohlc[-1][1] > self.ohlc[-1][4]:
@@ -569,6 +537,9 @@ class CandlestickChart():
                     self.candlesticks[1][-1].set_height(self.ohlc[-1][4] - self.ohlc[-1][1])
                     self.candlesticks[1][-1].set_color(self.green)
                     self.candlesticks[0][-1].set_color(self.green)
+                #self.axes[0].draw_artist(self.candlesticks[0][-1])
+                #self.axes[0].draw_artist(self.candlesticks[1][-1])
+                #self.fig.canvas.blit(self.axes[0].bbox)
             else:
                 self.candlesticks = candle(self.axes[0], self.ohlc, width=0.5, colorup=self.green, colordown=self.red)
         except Exception as e:
@@ -602,10 +573,25 @@ class CandlestickChart():
 
 
     # Draw/show figure
+    def update(self, data):
+        self.updateCurrentVol(data)
+        self.drawVolBars()
+
+        # update price chart
+        self.updateCandlesticks(data)
+        self.drawCandlesticks()
+
+        # update technical indicators
+        self.updateIndicators()
+        self.drawIndicators() 
+        
     def show(self):
         plt.show(block=False)
     
     def refresh(self):
+        t0 = time.time()
         self.fig.canvas.draw()      
         self.fig.canvas.flush_events()
+        t1 = time.time()
+        #print((t1-t0)*1000)
         #self.show()
