@@ -16,6 +16,9 @@ class MACD():
         self.ema2Wt = 2 / (self.ema2pd+1)
         self.ema3Wt = 2 / (self.ema3pd+1)
 
+        self.deriv = []
+        self.derivLine = None
+
         self.ax = ax
         self.ax.set_facecolor("#1e1e1e")
         self.ax.set_ylabel("MACD (%d, %d, %d)" % (self.ema2pd, self.ema1pd, self.ema3pd))
@@ -32,6 +35,8 @@ class MACD():
                 bar.set_color(self.red)
             else:
                 bar.set_color(self.green)
+        self.derivLine, = self.ax.plot(range(i-len(self.deriv)+1, i+1), self.deriv, "-", c="white", linewidth=0.7)
+            
 
     def calcEMAfromHistory(self, data, histCnt):
         numEx = len(data)
@@ -71,23 +76,28 @@ class MACD():
             idx = histCnt - i - 1
             if idx == 0:
                 self.macd.append(0)
+                self.deriv.append(0)
                 continue
             self.ema1 = ohlc[i][4] * self.ema1Wt + self.ema1 * (1-self.ema1Wt)
             self.ema2 = ohlc[i][4] * self.ema2Wt + self.ema2 * (1-self.ema2Wt)
             self.ema3 = (self.ema2-self.ema1) * self.ema3Wt + self.ema3 * (1-self.ema3Wt)
             self.macd.append((self.ema2-self.ema1) - self.ema3)
+            if i >= 2:
+                self.deriv.append((self.macd[i] - self.macd[i-2]) / 2)
 
     def update(self, ohlc, currInt, retain=True):
         tempEMA1 = ohlc[currInt][4] * self.ema1Wt + self.ema1 * (1 - self.ema1Wt)
         tempEMA2 = ohlc[currInt][4] * self.ema2Wt + self.ema2 * (1 - self.ema2Wt)
         tempEMA3 = (tempEMA2 - tempEMA1) * self.ema3Wt + self.ema3 * (1 - self.ema3Wt)
         self.macd[currInt] = (tempEMA2 - tempEMA1) - tempEMA3
+        self.deriv[-1] = (self.macd[-1] - self.macd[-3]) / 2
 
         if not retain:
             self.ema1 = tempEMA1
             self.ema2 = tempEMA2
             self.ema3 = tempEMA3
             self.addBar(currInt+1)
+            self.deriv.append(0)
 
     def addBar(self, i):
         self.macd.append(0)
@@ -106,6 +116,8 @@ class MACD():
             minMacd = min(self.macd[max(0, self.xlims[0]):self.xlims[1]])
             buf = (maxMacd - minMacd) * 0.12
             self.ax.set_ylim(min(0, minMacd - buf), max(0, maxMacd+buf))
+
+            self.derivLine.set_data(range(2,currInt+1), self.deriv)
         except Exception as e:
             print("Could not draw MACD:", e)
 
