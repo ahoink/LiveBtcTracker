@@ -1,7 +1,7 @@
 import time
 import threading
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from CandlestickChart import CandlestickChart
 import BTC_API as api
@@ -87,8 +87,11 @@ def correctData(data, ex, tnow):
             
     # okex is based on Hong Kong time
     elif ex == "okex":
+        isdst = time.localtime().tm_isdst > 0
         if interval == "6h":
             dt = datetime.fromtimestamp(data[-1][0])
+            if not isdst:
+                dt += timedelta(hours=1)
             if dt.hour == 6 or dt.hour == 18:
                 data = adjustTimestamps(data,7200)
             else:
@@ -97,6 +100,8 @@ def correctData(data, ex, tnow):
             data = adjustTimestamps(data, -14400)
         elif interval == "1d":
             dt = datetime.today()
+            if not isdst:
+                dt += timedelta(hours=1)
             if dt.hour < 12:
                 data = adjustTimestamps(data, 28800)
             else:
@@ -104,24 +109,11 @@ def correctData(data, ex, tnow):
 
     return data
 
-def main():
-    global run
-    global lastBfx
+def loadInitData(chart, hist, t):
     global candleData
-    global exchanges
     global numEx
-    global hist
-    
-    # Create chart object that controls all matplotlib related functionality
-    chart = CandlestickChart(useCBP=useCBP)
-    chart.setVolBreakdown(volBrkDwn)
-    chart.show()
+    global exchanges
 
-    # Most recent interval start time
-    t = time.time()
-    t -= (t%granularity)
-
-    # Get some history and current candle to start
     candleData = []
     failed = []
     histPlusEMAPd = hist + 26 + 9
@@ -148,6 +140,28 @@ def main():
         for wasDown,ex in zip(exDown, exchanges):
             if wasDown:
                 print("\t%s" % ex)
+    
+
+def main():
+    global run
+    global lastBfx
+    global candleData
+    global exchanges
+    global numEx
+    global hist
+
+    # ---------- PREPARE TRACKER ---------- #
+    # Create chart object that controls all matplotlib related functionality
+    chart = CandlestickChart(useCBP, "MACD", "RSI")
+    chart.setVolBreakdown(volBrkDwn)
+    chart.show()
+
+    # Most recent interval start time
+    t = time.time()
+    t -= (t%granularity)
+
+    # Get some history and current candle to start
+    loadInitData(chart, hist, t)
 
     # For some reason, can only show legend AFTER plotting something
     chart.setVolumeLegend(legend)
@@ -161,6 +175,7 @@ def main():
     thrd = threading.Thread(target=retrieveData, args=())
     thrd.start()
 
+    # ---------- START TRACKER ---------- #
     # Loop to constantly update the current time interval candle and volume bar
     while True:
         
@@ -295,10 +310,11 @@ if __name__ == "__main__":
     print("\tOKEx: %d" % float(okStats["base_volume_24h"]))
 
     # global variable used between threads
-    run = True
-    lastBfx = 0
-    candleData = []
-    cbpPrice = {"price":0}
+    run = True              # flag for running data retreival thread
+    lastBfx = 0             # finex has a lower rate limit, keep track of last call
+    candleData = []         # TOHLCV candlestick data for each exchange
+    cbpPrice = {"price":0}  # keep track of real-time CBP price - candlestick API doesn't update as often
+
     main()
 
     print("Done.")
