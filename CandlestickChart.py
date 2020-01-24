@@ -16,20 +16,20 @@ from Indicators import RSI
 
 class CandlestickChart():
 
-    def __init__(self, numPlots=3, useCBP=True):
+    def __init__(self, useCBP, *args):
         rcparams["toolbar"] = "None"
-        #self.fig, self.axes = plt.subplots(numPlots,1, sharex=True)
         self.fig = plt.figure()
+        numIndicators = len(args)
         # Initialize subplots for price and volume charts
-        numIndicators = 2
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
         self.axes.append(plt.subplot2grid((5+numIndicators,1),(3,0), rowspan=2, sharex=self.axes[0]))
         # add subplot axes for indicators (1 rowspan per indicator)
-        self.axes.append(plt.subplot2grid((5+numIndicators,1),(5,0), sharex=self.axes[0]))
-        self.axes.append(plt.subplot2grid((5+numIndicators,1),(6,0), sharex=self.axes[0]))
+        for i in range(len(args)):
+            self.axes.append(plt.subplot2grid((5+numIndicators,1),(5+i,0), sharex=self.axes[0]))
+        #self.axes.append(plt.subplot2grid((5+numIndicators,1),(6,0), sharex=self.axes[0]))
 
         # configure figure size/layout and connect event handlers
-        self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1-inch per indicator
+        self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
         plt.subplots_adjust(top=0.95, bottom=0.05, wspace=0, hspace=0.05)
         self.axes[0].title.set_text("Loading...")
         self.fig.canvas.mpl_connect("close_event", self._handleClose)
@@ -84,8 +84,15 @@ class CandlestickChart():
         self.backgrounds = None
 
         # indicators
-        self.macd = MACD(self.axes[2], self.xlims)
-        self.rsi = RSI(self.axes[3], self.xlims)
+        self.indicators = []
+        for i,arg in enumerate(args):
+            lowArg = arg.lower()
+            if lowArg == "macd":
+                self.indicators.append(MACD(self.axes[2+i], self.xlims))
+            elif lowArg == "rsi":
+                self.indicators.append(RSI(self.axes[2+i], self.xlims))
+            else:
+                print("WARNING: No indicator named '%s'" % arg)
 
         # volume default attributes
         self.axes[1].set_ylabel("Volume (BTC)")
@@ -352,14 +359,19 @@ class CandlestickChart():
 
         # Load history for indicators
         if self.useCBP:
-            self.macd.loadHistory(self.ohlc, data[:-1], histCnt)
-            self.rsi.loadHistory(self.ohlc, data[:-1], histCnt)
+            for ind in self.indicators:
+                ind.loadHistory(self.ohlc, data[:-1], histCnt)
+            #self.rsi.loadHistory(self.ohlc, data[:-1], histCnt)
         else:
-            self.macd.loadHistory(self.ohlc, data, histCnt)
-            self.rsi.loadHistory(self.ohlc, data, histCnt)
-        
-        self.macd.initPlot(self.currInt)
-        self.rsi.initPlot(self.currInt)
+            for ind in self.indicators:
+                ind.loadHistory(self.ohlc, data, histCnt)
+            #self.macd.loadHistory(self.ohlc, data, histCnt)
+            #self.rsi.loadHistory(self.ohlc, data, histCnt)
+
+        for ind in self.indicators:
+                ind.initPlot(self.currInt)
+        #self.macd.initPlot(self.currInt)
+        #self.rsi.initPlot(self.currInt)
 
         #self.fig.canvas.draw()
         #self.backgrounds = [self.fig.canvas.copy_from_bbox(ax.bbox) for ax in self.axes]
@@ -390,8 +402,10 @@ class CandlestickChart():
     # ----- Everything Else --- #
     def incCurrIntvl(self):
         # update indicators
-        self.macd.update(self.ohlc, self.currInt, retain=False)
-        self.rsi.update(self.ohlc, self.currInt, retain=False)
+        for ind in self.indicators:
+            ind.update(self.ohlc, self.currInt, retain=False)
+        #self.macd.update(self.ohlc, self.currInt, retain=False)
+        #self.rsi.update(self.ohlc, self.currInt, retain=False)
 
         # update chart limits
         self.currInt += 1
@@ -496,14 +510,19 @@ class CandlestickChart():
 
     # Indicator functions
     def updateIndicators(self, retain=True):
-        self.macd.update(self.ohlc, self.currInt, retain)
-        self.rsi.update(self.ohlc, self.currInt, retain)
+        for ind in self.indicators:
+            ind.update(self.ohlc, self.currInt, retain)
+        #self.macd.update(self.ohlc, self.currInt, retain)
+        #self.rsi.update(self.ohlc, self.currInt, retain)
         
     def drawIndicators(self):
-        self.macd.xlims = self.xlims
-        self.macd.draw(self.currInt)
-        self.rsi.xlims = self.xlims
-        self.rsi.draw(self.currInt)
+        for ind in self.indicators:
+            ind.xlims = self.xlims
+            ind.draw(self.currInt)
+        #self.macd.xlims = self.xlims
+        #self.macd.draw(self.currInt)
+        #self.rsi.xlims = self.xlims
+        #self.rsi.draw(self.currInt)
 
 
 
