@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.4.0)
+Live Bitcoin chart averaging data from multiple exchanges (v0.4.3)
 
 It's rough right now, but it works
 
@@ -13,7 +13,7 @@ Dependencies must be manual installed at the moment.
 * requests
 
 ## About
-This project uses data from multiple exchanges and matplotlib to chart Bitcoin in real-time. This includes a typical candlestick chart, volume bar chart, and MACD histogram. The plot is configurable to different timeframes and interval sizes (although each exchange API can only work with specific time intervals).
+This project uses data from multiple exchanges and matplotlib to chart Bitcoin in real-time. This includes a typical candlestick chart, volume bar chart, and technical indicators. The plot is configurable to different timeframes and interval sizes (although each exchange API can only work with specific time intervals).
 
 Data is currently sourced from the following exchanges:
 * Binance
@@ -35,3 +35,14 @@ Volume information is the sum of all exchanges. Buy volume percentages are based
 
 ## Future Work
 I plan to update this as it fits my wants and needs. If you have different ideas or desires feel free to fork it. However, you may also make suggestions and requests.
+
+I plan do eventually add the following (no specific order)
+* Various additional indicators, price bands, etc.
+* Ability to add/remove/configure indicators at runtime
+* Ability to change time interval at runtime
+* More accurate time intervals (timezones messes this up right now)
+* Faster and more efficient real-time drawing (right now it increasingly lags as chart objects are added because it redraws everything every frame)
+* Additional history (must come after the faster drawing, more history = more lag right now)
+* pip install (application will no longer be considered beta phase at this point, v0.x -> v1.x)
+
+Also, it turns out matplotlib isn't great for real-time plotting. At some point I may decided to switch to a different library.
