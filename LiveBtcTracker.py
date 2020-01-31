@@ -13,6 +13,7 @@ def retrieveData():
     global exchanges
     global numEx
     global candleData
+    global useCBP
 
     failures = [0]*numEx
     if run: print("success")
@@ -20,15 +21,19 @@ def retrieveData():
     
     while run:
         ti = time.time()
-        
+
         # Get candle data from each exchange
-        if useCBP: cbpPrice = api.liveTicker("coinbasepro")
+        if useCBP:
+            cbpPrice = api.liveTicker("coinbasepro")
+            if cbpPrice == None:
+                cbpPrice = {"price":0}
+                failures[-1] += 1
         for i in range(numEx):
             # bitfinex api is rate limited to every 3 seconds
-            if exchanges[i] == "bitfinex" and time.time() - lastBfx < 3:
+            if (exchanges[i] == "bitfinex" and time.time() - lastBfx < 3):
                 continue
             temp = api.getCandle(exchanges[i], interval)
-            if temp is None:
+            if temp == None:
                 failures[i] += 1
                 if failures[i] == 3:
                     print("Stopping requests to %s (Restart to try again)" % exchanges[i])
@@ -43,11 +48,34 @@ def retrieveData():
             candleData = [d for d,f in zip(candleData, failures) if f < 3]
             failures = [f for f in failures if f < 3]  
             numEx = len(exchanges)
+            useCBP = ("coinbasepro" in exchanges)
             
         tf = time.time()
         time.sleep(max(0.01, 1-(tf-ti)))
     print("ended")
 
+def secondsToString(time_s):
+    timeStr = ""
+    if time_s >= 86400:
+        dys = time_s/86400
+        hrs = (dys-int(dys))*24
+        mns = (hrs-int(hrs))*60
+        scs = (mns-int(mns))*60
+        timeStr = "%d:%02d:%02d:%02d" % (dys, hrs, mns, scs)
+    elif time_s >= 3600:
+        hrs = time_s/3600
+        mns = (hrs-int(hrs))*60
+        scs = (mns-int(mns))*60
+        timeStr = "%02d:%02d:%02d" % (hrs, mns, scs)
+    else:
+        mns = time_s/60
+        scs = time_s if mns == 0 else (mns-int(mns))*60
+        timeStr = "%02d:%02d" % (mns, scs)
+    return timeStr
+
+
+
+# ----- These functions are generally only run once ----- #
 def filterDupes(data):
     filtered = []
     lastT = 0
@@ -113,6 +141,7 @@ def loadInitData(chart, hist, t):
     global candleData
     global numEx
     global exchanges
+    global useCBP
 
     candleData = []
     failed = []
@@ -131,6 +160,7 @@ def loadInitData(chart, hist, t):
     lastBfx = time.time()
     for f in failed:
         exchanges.remove(f)
+    useCBP = ("coinbasepro" in exchanges)
     numEx = len(exchanges)
        
     # Load history
@@ -139,8 +169,7 @@ def loadInitData(chart, hist, t):
         print("WARNING: The following exchanges were down for a period of time")
         for wasDown,ex in zip(exDown, exchanges):
             if wasDown:
-                print("\t%s" % ex)
-    
+                print("\t%s (%d)" % (ex, len(wasDown)))
 
 def main():
     global run
@@ -165,10 +194,6 @@ def main():
 
     # For some reason, can only show legend AFTER plotting something
     chart.setVolumeLegend(legend)
-
-    # Mark the highest and lowest prices levels in the current window
-    maxHi = chart.getHighestPrice()
-    minLo = chart.getLowestPrice()
 
     # Start separate thread for API calls (they're slow)
     print("Starting data retrieval thread...", end='')
@@ -201,6 +226,8 @@ def main():
                             for j in range(numEx-1):
                                 chart.setVol(j, idx, chart.getVol(j,idx) - chart.getVol(-1,idx) + candleData[-1][i][5])
                             chart.setVol(-1,idx,candleData[-1][i][5])
+        elif chart.useCBP: chart.useCBP = False
+            
         
 
         # average price from all exchanges (should weight by volume?)
@@ -210,21 +237,12 @@ def main():
             price = (price + float(cbpPrice["price"])) / numEx
         else:
             price = sum([float(x[0][4]) for x in candleData]) / numEx
-        chart.setTitle("$%.2f (%s)" % (price, interval))
+
+        timeLeft = secondsToString(t+granularity-t1)
+        chart.setTitle("$%.2f (%s - %s)" % (price, interval, timeLeft))
 
         # update all charts with the newest data
-        chart.update(candleData)     
-        
-        # Mark highest and lowest wicks
-        # TODO: this doesn't actually work anymore with shifting windows
-        tempHi = chart.getHighestPrice()
-        tempLo = chart.getLowestPrice()
-        if tempHi > maxHi:
-            chart.updateHiLevel()
-            maxHi = tempHi
-        if tempLo < minLo:
-            chart.updateLoLevel()
-            minLo = tempLo
+        chart.update(candleData)
 
         try:
             chart.refresh()
@@ -291,23 +309,23 @@ if __name__ == "__main__":
     okStats = api.getDailyVol("okex")
 
     totVol = 0
-    totVol += float(bfxStats[0]["volume"])
+    if bfxStats != None: totVol += float(bfxStats[0]["volume"])
     #totVol += float(stampStats["volume"])
-    totVol += float(binStats["volume"])
-    totVol += float(cbpStats["volume"])
-    totVol += float(gemStats["volume"]["BTC"])
-    totVol += float(okStats["base_volume_24h"])
+    if binStats != None: totVol += float(binStats["volume"])
+    if cbpStats != None: totVol += float(cbpStats["volume"])
+    if gemStats != None: totVol += float(gemStats["volume"]["BTC"])
+    if okStats != None: totVol += float(okStats["base_volume_24h"])
 
     # ---------- Print info ---------- #
     print("Tracking %d exchanges on the %s interval" % (numEx, interval))
     print("Data sources: ", exchanges)
     print("Break down volume bars by exchange: %s" % str(volBrkDwn))
     print("24 hour volume: %f BTC" % totVol)
-    print("\tBitfinex: %d" % float(bfxStats[0]["volume"]))
-    print("\tBinance: %d" % float(binStats["volume"]))
-    print("\tCoinbasePro: %d" % float(cbpStats["volume"]))
-    print("\tGemini: %d" % float(gemStats["volume"]["BTC"]))
-    print("\tOKEx: %d" % float(okStats["base_volume_24h"]))
+    if bfxStats != None: print("\tBitfinex: %d" % float(bfxStats[0]["volume"]))
+    if binStats != None: print("\tBinance: %d" % float(binStats["volume"]))
+    if cbpStats != None: print("\tCoinbasePro: %d" % float(cbpStats["volume"]))
+    if gemStats != None: print("\tGemini: %d" % float(gemStats["volume"]["BTC"]))
+    if okStats != None: print("\tOKEx: %d" % float(okStats["base_volume_24h"]))
 
     # global variable used between threads
     run = True              # flag for running data retreival thread

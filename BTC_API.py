@@ -5,7 +5,8 @@ from datetime import datetime
 def getDailyVol(ex):
     url = ""
     params=None
-
+    resp = {}
+    
     if ex == "binance":
         url = "https://api.binance.com/api/v1/ticker/24hr"
         params = params={"symbol":"BTCUSDT"}
@@ -25,8 +26,17 @@ def getDailyVol(ex):
 
     elif ex == "okex":
         url = "https://www.okex.com/api/spot/v3/instruments/BTC-USDT/ticker"
+
+    try:
+        resp = requests.get(url, params=params)
+    except:
+        print("An error occured while try to communicate with %s" % ex)
+        return None
+
+    if resp.status_code != 200:
+        print("Unable to retrieve data from %s (%d)" % (ex, resp.status_code))
+        return None
         
-    resp = requests.get(url, params=params)
     return resp.json()
 
 def getCandle(ex, tint, lim=1):
@@ -96,6 +106,13 @@ def getCandle(ex, tint, lim=1):
         for x in temp:
             ret.append([x[0], x[1], x[3], x[4], x[2], x[5]])
         return ret
+    elif ex == "coinbasepro":
+        # reorder from [tlhocv] -> [tohlcv]
+        temp = resp
+        ret = []
+        for x in temp:
+            ret.append([x[0], x[3], x[2], x[1], x[4], x[5]])
+        return ret
     
     return resp
 
@@ -106,7 +123,16 @@ def liveTicker(ex):
     if ex == "coinbasepro":
         url = "https://api.pro.coinbase.com/products/BTC-USD/ticker"
 
-    resp = requests.get(url, params=params)
+    try:
+        resp = requests.get(url, params=params)
+    except:
+        print("An error occured while try to communicate with %s" % ex)
+        return None
+
+    if resp.status_code != 200:
+        print("Unable to retrieve data from %s (%d)" % (ex, resp.status_code))
+        return None
+    
     return resp.json()
 
 def validInterval(ex, interval):

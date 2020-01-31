@@ -72,6 +72,7 @@ class CandlestickChart():
         self.loText = None
 
         # misc vars
+        self.timestamps = []
         self.currInt = 0
         self.green = "#22d615"
         self.red = "#ea2222"
@@ -175,15 +176,16 @@ class CandlestickChart():
 
     def _updateCursorText(self, x):
         if 0 <= x <= self.currInt:
+            timeStr = time.strftime("%d %b %Y %H:%M", time.localtime(self.timestamps[x]))
             self.cursorText0.set_text(
-                "Open: %.2f, High: %.2f, Low: %.2f, Close: %.2f" %
-                (self.ohlc[x][1], self.ohlc[x][2], self.ohlc[x][3], self.ohlc[x][4]))
+                "%s    Open: %.2f, High: %.2f, Low: %.2f, Close: %.2f" %
+                (timeStr, self.ohlc[x][1], self.ohlc[x][2], self.ohlc[x][3], self.ohlc[x][4]))
             self.cursorText0.set_y(
                 self.getHighestPrice() + (self.getHighestPrice() - self.getLowestPrice()) * 0.04)
             self.cursorText0.set_x(self.xlims[0]+0.25)
             
             self.cursorText1.set_text("Volume: %.8f (%.1f%% Buys)" % (self.vol[0][x], self.volRatio[x]*100))
-            self.cursorText1.set_y(max(self.vol[0][max(0,self.xlims[0]):]))
+            self.cursorText1.set_y(max(self.vol[0][max(0, self.xlims[0]):min(len(self.vol[0]), self.xlims[1])]))
             self.cursorText1.set_x(self.xlims[0]+0.25)
         else:
             self.cursorText0.set_text("")
@@ -292,10 +294,10 @@ class CandlestickChart():
         self.sellEma = [0]
 
         # calc volume EMAs from history
-        if self.useCBP: self.calcEMAfromHist(data[:-1], histCnt)
+        if False and self.useCBP: self.calcEMAfromHist(data[:-1], histCnt) # TODO: REMOVE FALSE
         else: self.calcEMAfromHist(data, histCnt)
 
-        exDown = [False]*numEx
+        exDown = [[] for i in range(numEx)]
         # shift data when needed if exchange was down (to reallign)
         for i in range(histCnt):
             avgT = sum([x[i][0] for x in data]) / numEx
@@ -310,12 +312,13 @@ class CandlestickChart():
             idx = histCnt-1-i
 
             # Check timestamps to see if an exchange was down during that time
+            self.timestamps.append(max([x[idx][0] for x in data]))
             invalid = []
             avgT = sum([x[idx][0] for x in data]) / numEx
             for j in range(numEx):
                 if data[j][idx][0] < avgT:
                     invalid.append(data[j])
-                    exDown[j] = True
+                    exDown[j].append(i)
             #invalid = [x for x in data if x[idx][0] < avgT]
 
             # sum volume from all exchanges
@@ -337,7 +340,7 @@ class CandlestickChart():
             # append ohlc candle data (but ignore coinbase which may not be up-to-date)
             self.ohlc.append([i] + [0]*4)
             for j in range(1,5):
-                if self.useCBP:
+                if False and self.useCBP: # TODO: REMOVE FALSE
                     self.ohlc[i][j] =\
                     sum([float(x[idx][j]) for x in data[:-1] if x not in invalid]) /\
                     (len([x for x in data[:-1] if x not in invalid]))
@@ -358,20 +361,15 @@ class CandlestickChart():
         self._initVolBars()
 
         # Load history for indicators
-        if self.useCBP:
+        if False and self.useCBP: # TODO: REMOVE FALSE
             for ind in self.indicators:
                 ind.loadHistory(self.ohlc, data[:-1], histCnt)
-            #self.rsi.loadHistory(self.ohlc, data[:-1], histCnt)
         else:
             for ind in self.indicators:
                 ind.loadHistory(self.ohlc, data, histCnt)
-            #self.macd.loadHistory(self.ohlc, data, histCnt)
-            #self.rsi.loadHistory(self.ohlc, data, histCnt)
 
         for ind in self.indicators:
                 ind.initPlot(self.currInt)
-        #self.macd.initPlot(self.currInt)
-        #self.rsi.initPlot(self.currInt)
 
         #self.fig.canvas.draw()
         #self.backgrounds = [self.fig.canvas.copy_from_bbox(ax.bbox) for ax in self.axes]
@@ -404,8 +402,6 @@ class CandlestickChart():
         # update indicators
         for ind in self.indicators:
             ind.update(self.ohlc, self.currInt, retain=False)
-        #self.macd.update(self.ohlc, self.currInt, retain=False)
-        #self.rsi.update(self.ohlc, self.currInt, retain=False)
 
         # update chart limits
         self.currInt += 1
@@ -458,7 +454,7 @@ class CandlestickChart():
     def createBar(self, axis):
         if axis == 1:
             for i in range(len(self.volBars)):
-                self.volBars[i].append(mpatches.Rectangle((self.currInt - 0.4, 0), width=0.8, height=0))
+                self.volBars[i].append(mpatches.Rectangle((self.currInt - 0.4, 0), width=0.8, height=0, color=self.volBars[i][self.currInt-1].get_fc()))
                 self.axes[axis].add_patch(self.volBars[i][-1])
 
     def drawVolBars(self):
@@ -512,25 +508,20 @@ class CandlestickChart():
     def updateIndicators(self, retain=True):
         for ind in self.indicators:
             ind.update(self.ohlc, self.currInt, retain)
-        #self.macd.update(self.ohlc, self.currInt, retain)
-        #self.rsi.update(self.ohlc, self.currInt, retain)
         
     def drawIndicators(self):
         for ind in self.indicators:
             ind.xlims = self.xlims
             ind.draw(self.currInt)
-        #self.macd.xlims = self.xlims
-        #self.macd.draw(self.currInt)
-        #self.rsi.xlims = self.xlims
-        #self.rsi.draw(self.currInt)
-
 
 
     # Candle/Price related functions
     def updateCandlesticks(self, data):
         for i in range(1,5):
-            if self.useCBP: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data[:-1]]) / (len(data)-1)
+            # TODO: REMOVE FALSE
+            if False and self.useCBP: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data[:-1]]) / (len(data)-1)
             else: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
+            #self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
 
     def createCandlestick(self):
         # create new candlestick and add it to the axis
@@ -566,27 +557,31 @@ class CandlestickChart():
             
     def getHighestPrice(self):
         idx = int(max(0, self.xlims[0]))
-        return max([x[2] for x in self.ohlc[idx:]])
+        idx2 = int(min(len(self.ohlc), self.xlims[1]))
+        return max([x[2] for x in self.ohlc[idx:idx2]])
 
     def getLowestPrice(self):
         idx = int(max(0, self.xlims[0]))
-        return min([x[3] for x in self.ohlc[idx:]])
+        idx2 = int(min(len(self.ohlc), self.xlims[1]))
+        return min([x[3] for x in self.ohlc[idx:idx2]])
     
-    def updateHiLevel(self):
-        hi = self.getHighestPrice()      
+    def updateHiLevel(self, hi=None, lo=None):
+        if hi == None: hi = self.getHighestPrice()
+        if lo == None: lo = self.getLowestPrice()
         self.hiLine.set_data([-1, self.xlims[1]], [hi, hi])
         self.hiText.set_text("%.2f" % hi)
         self.hiText.set_position((self.xlims[1] + 1.1, hi))
-        buf = (hi - self.getLowestPrice()) * 0.12
+        buf = (hi - lo) * 0.12
         self.axes[0].set_ylim(self.axes[0].get_ylim()[0], hi + buf)
  
-    def updateLoLevel(self):
-        lo = self.getLowestPrice()
+    def updateLoLevel(self, hi=None, lo=None):
+        if hi == None: hi = self.getHighestPrice()
+        if lo == None: lo = self.getLowestPrice()
         if lo == 0: return    
         self.loLine.set_data([-1, self.xlims[1]], [lo, lo])  
         self.loText.set_text("%.2f" % lo)
         self.loText.set_position((self.xlims[1] + 1.1, lo))
-        buf = (self.getHighestPrice() - lo) * 0.12
+        buf = (hi - lo) * 0.12
         self.axes[0].set_ylim(lo - buf, self.axes[0].get_ylim()[1])
 
 
@@ -597,8 +592,17 @@ class CandlestickChart():
         self.drawVolBars()
 
         # update price chart
+        tempHi = self.getHighestPrice()
+        tempLo = self.getLowestPrice()
         self.updateCandlesticks(data)
         self.drawCandlesticks()
+        # check if highest or lowest price changed (new data or panning window) and update the markers
+        newHi = self.getHighestPrice()
+        newLo = self.getLowestPrice()
+        if tempHi != newHi:
+            self.updateHiLevel(hi=newHi, lo=newLo)
+        if tempLo != newHi:
+            self.updateLoLevel(hi=newHi, lo=newLo)
 
         # update technical indicators
         self.updateIndicators()
