@@ -39,7 +39,7 @@ def getDailyVol(ex):
         
     return resp.json()
 
-def getCandle(ex, tint, lim=1):
+def getCandle(ex, tint, lim=1, start=None, end=None):
     url = ""
     params=None
     ret = None
@@ -74,6 +74,9 @@ def getCandle(ex, tint, lim=1):
     elif ex == "okex":
         url = "https://www.okex.com/api/spot/v3/instruments/BTC-USDT/candles"
         params = {"granularity":str(granFromInterv(tint))}
+        if start != None and end != None:
+            params["start"] = start
+            params["end"] = end
  
     else:
         print("No API for exchange %s" % ex)
@@ -91,6 +94,7 @@ def getCandle(ex, tint, lim=1):
     
     # normalize to consistent timestamps
     resp = resp.json()
+    oldestTS = resp[-1][0] if ex == "okex" else ""
     for entry in resp:
         if isinstance(entry[0], str):
             dt = datetime.strptime(entry[0], "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -113,7 +117,11 @@ def getCandle(ex, tint, lim=1):
         for x in temp:
             ret.append([x[0], x[3], x[2], x[1], x[4], x[5]])
         return ret
-    
+    elif ex == "okex" and lim > 200:
+        # okex is limited to 200 entries. Paginate to get an additional 200
+        resp2 = getCandle(ex, tint, lim=lim-200, start="2014-01-01T00:00:00.000Z", end=oldestTS)
+        resp += resp2
+        
     return resp
 
 def liveTicker(ex):
@@ -152,7 +160,7 @@ def validInterval(ex, interval):
         intervals = ["1m", "5m", "15m", "30m", "1h", "6h", "1d"]
         
     elif ex == "okex":
-        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "6h", "12h", "1d"]
+        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w"]
         #grans = [60, 180, 300, 900, 1800, 3600, 7200, 14400, 43200, 86400]
 
     else:

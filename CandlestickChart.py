@@ -18,7 +18,7 @@ class CandlestickChart():
 
     def __init__(self, useCBP, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure()
+        self.fig = plt.figure("Live BTC Tracker (v0.5.1)")
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
@@ -351,7 +351,7 @@ class CandlestickChart():
 
 
         # initialize chart objects
-        if len(self.ohlc) < 100:
+        if len(self.ohlc) != 100:
             self.xlims = [len(self.ohlc) - 16, len(self.ohlc) + 16]
             for ax in self.axes:
                 ax.set_xlim(self.xlims)

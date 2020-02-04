@@ -162,6 +162,12 @@ def loadInitData(chart, hist, t):
         exchanges.remove(f)
     useCBP = ("coinbasepro" in exchanges)
     numEx = len(exchanges)
+
+    '''for i in range(numEx):
+        diff = len(candleData[i]) - histPlusEMAPd
+        print(diff)
+        if diff > 0:
+            candleData[i] = candleData[:-diff]'''
        
     # Load history
     exDown = chart.loadHistory(candleData, hist)
@@ -261,14 +267,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--interval", help="Time interval to track (exchange APIs only allow specific intervals)", required=False, default="1h")
     parser.add_argument("-V", "--vol_breakdown", help="Use if volume bars should be broken down by exchange", action="store_true")
-    #parser.add_argument("-y", "--history", help="How many time intervals of history to load at start (must be less than num_intervals)", required=False, type=int, default=8)
+    parser.add_argument("-y", "--history", help="How many time intervals of history to load at start", required=False, type=int, default=100)
     args = vars(parser.parse_args())
 
 
     # CONTROL PARAMETERS
     volBrkDwn = args["vol_breakdown"]   # Breakdown volume by exchange
     interval = args["interval"]         # Time interval to watch
-    hist = 100
+    hist = args["history"]              # amount of history to load at start
     
     exchanges = ["binance", "okex", "bitfinex", "gemini", "coinbasepro"] # Binance must be first, CBP must be last
     numEx = len(exchanges)
@@ -276,9 +282,14 @@ if __name__ == "__main__":
     legend = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]
 
     # arg checks
-    #if (hist > 200):
-    #    print("WARNING: Preloading history is limited to 200 intervals")
-    #    hist = 200
+    if (hist > 100):
+        if hist > 500:
+            print("WARNING: to prevent excessive lag, history has been capped to 500")
+            hist = 500
+        else:
+            print("INFO: Loading a lot of history may increase lag")
+        
+
     if not api.validInterval("binance", interval):
         print("WARNING: %s is not a valid interval" % interval)
         print("\tDefaulting to 1h")

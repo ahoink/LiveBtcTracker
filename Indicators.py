@@ -156,7 +156,7 @@ class RSI():
     def loadHistory(self, ohlc, data, histCnt):
 
         # calculate rsi for history data that occurs before the displayed data
-        n = len(data[0])
+        n = min([len(d) for d in data]) #(data[0])
         for i in range(n - histCnt):
             idx = n-i-1
             tempOpen = sum([float(x[idx][1]) for x in data]) / len(data)
