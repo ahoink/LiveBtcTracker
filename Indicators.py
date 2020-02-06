@@ -121,6 +121,16 @@ class MACD():
         except Exception as e:
             print("Could not draw MACD:", e)
 
+    def drawArtists(self, redraw):
+        if redraw:
+            idx0 = max(0, self.xlims[0])
+            idx1 = min(self.xlims[1]+1, len(self.macdBars)-1)
+            for i in range(idx0, idx1):
+                self.ax.draw_artist(self.macdBars[i])
+        else:
+            self.ax.draw_artist(self.macdBars[(min(self.xlims[1]+1, len(self.macdBars)-1))])
+            self.ax.draw_artist(self.derivLine)
+
 class RSI():
 
     def __init__(self, ax, xlims):
@@ -132,6 +142,7 @@ class RSI():
         self.hiThresh = None
         self.loThresh = None
         self.rsiText = None
+        self.over_fill = []
         
         self.ax = ax
         self.ax.set_facecolor("#1e1e1e")
@@ -150,8 +161,10 @@ class RSI():
         ylo = [30]*len(self.rsi)
         overbought = [y1 > y2 for y1,y2 in zip(self.rsi, yhi)]
         oversold = [y1 < y2 for y1,y2 in zip(self.rsi, ylo)]
-        self.ax.fill_between(range(i+1), self.rsi, yhi, where=overbought, facecolor="red", interpolate=True)
-        self.ax.fill_between(range(i+1), self.rsi, ylo, where=oversold, facecolor="blue", interpolate=True)
+        self.over_fill.append(self.ax.fill_between(range(i+1), self.rsi, yhi, where=overbought, facecolor="red", interpolate=True))
+        self.over_fill.append(self.ax.fill_between(range(i+1), self.rsi, ylo, where=oversold, facecolor="blue", interpolate=True))
+        #print(self.over_fill[0])
+
         
     def loadHistory(self, ohlc, data, histCnt):
 
@@ -223,12 +236,25 @@ class RSI():
         if self.rsi[currInt] < 30: 
             ylo = [30]*len(self.rsi)
             oversold = [y1 < y2 for y1,y2 in zip(self.rsi, ylo)]
-            self.ax.fill_between(range(currInt+1), self.rsi, ylo, where=oversold, facecolor="blue", interpolate=True)
+            self.over_fill[1].remove()
+            self.over_fill[1] = self.ax.fill_between(range(currInt+1), self.rsi, ylo, where=oversold, facecolor="blue", interpolate=True)
         elif self.rsi[currInt] > 70:
             yhi = [70]*len(self.rsi)
             overbought = [y1 > y2 for y1,y2 in zip(self.rsi, yhi)]
-            self.ax.fill_between(range(currInt+1), self.rsi, yhi, where=overbought, facecolor="red", interpolate=True)
+            self.over_fill[0].remove()
+            self.over_fill[0] = self.ax.fill_between(range(currInt+1), self.rsi, yhi, where=overbought, facecolor="red", interpolate=True)
 
+    def drawArtists(self, redraw):
+        if redraw:
+            self.ax.draw_artist(self.hiThresh)
+            self.ax.draw_artist(self.loThresh)
+            self.ax.draw_artist(self.over_fill[0])
+            self.ax.draw_artist(self.over_fill[1])
+        else:
+            self.ax.draw_artist(self.rsiPlot)
+            self.ax.draw_artist(self.rsiText)
+        
+        
             
         
         

@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.5.1)
+Live Bitcoin chart averaging data from multiple exchanges (v0.5.2)
 
 It's rough right now, but it works
 
@@ -41,8 +41,6 @@ I plan do eventually add the following (no specific order)
 * Ability to add/remove/configure indicators at runtime
 * Ability to change time interval at runtime
 * More accurate time intervals (timezones messes this up right now)
-* Faster and more efficient real-time drawing (right now it increasingly lags as chart objects are added because it redraws everything every frame)
-* Additional history (must come after the faster drawing, more history = more lag right now)
 * pip install (application will no longer be considered beta phase at this point, v0.x -> v1.x)
 
 Also, it turns out matplotlib isn't great for real-time plotting. At some point I may decided to switch to a different library.

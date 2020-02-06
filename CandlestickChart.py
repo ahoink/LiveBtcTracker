@@ -18,7 +18,7 @@ class CandlestickChart():
 
     def __init__(self, useCBP, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.5.1)")
+        self.fig = plt.figure("Live BTC Tracker (v0.5.2)")
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
@@ -30,8 +30,8 @@ class CandlestickChart():
 
         # configure figure size/layout and connect event handlers
         self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
-        plt.subplots_adjust(top=0.95, bottom=0.05, wspace=0, hspace=0.05)
-        self.axes[0].title.set_text("Loading...")
+        plt.subplots_adjust(top=0.99, bottom=0.05, wspace=0, hspace=0.05)
+        #self.axes[0].title.set_text("Loading...")
         self.fig.canvas.mpl_connect("close_event", self._handleClose)
         self.fig.canvas.mpl_connect("scroll_event", self._handleScroll)
         self.fig.canvas.mpl_connect("button_press_event", self._mouseClick)
@@ -70,6 +70,7 @@ class CandlestickChart():
         self.hiText = None
         self.loLine = None
         self.loText = None
+        self.title = None
 
         # misc vars
         self.timestamps = []
@@ -83,6 +84,8 @@ class CandlestickChart():
         self.pan = False
         self.lastMouseX = 0
         self.backgrounds = None
+        self.redraw = True
+        self.fullRedraw = False
 
         # indicators
         self.indicators = []
@@ -120,11 +123,25 @@ class CandlestickChart():
         dx = int(event.step)
         while abs(dx) > 0:
             if -1 <= self.xlims[0] + dx < self.currInt - 1:
+                # get hi/lo prices before zooming
+                tempHi = self.getHighestPrice()
+                tempLo = self.getLowestPrice()
+
+                # adjust xlims
                 self.xlims = [self.xlims[0] + dx, self.xlims[1]]
                 for ax in self.axes:
                     ax.set_xlim(self.xlims)
-                self.updateHiLevel()
-                self.updateLoLevel()
+                    
+                # get hi/lo prices after zooming
+                newHi = self.getHighestPrice()
+                newLo = self.getLowestPrice()
+                self.updateHiLevel(hi=newHi, lo=newLo)
+                self.updateLoLevel(hi=newHi, lo=newLo)
+
+                # if hi/lo price changed, do a full redraw to redraw axis labels and hi/lo text
+                if tempHi != newHi or tempLo != newLo:
+                    self.fullRedraw = True
+                self.redraw = True
                 break
             dx = dx + 1 if dx < 0 else dx - 1
 
@@ -160,18 +177,34 @@ class CandlestickChart():
             self.cursor1.set_xdata([cx, cx])
             self.cursor1.set_ydata([0, max(self.vol[0])*1.1])
             self._updateCursorText(x)
+            
         if self.pan:
             w = (self.fig.get_size_inches()*self.fig.dpi)[0] * 0.774
             dx = (event.x - self.lastMouseX) * (self.xlims[1] - self.xlims[0]) / w
             #dx = int(dx + 1) if dx > 0 else int(dx - 1)
             if abs(dx) < 1: return
-            if -1 <= self.xlims[0]-dx < self.currInt-1: 
+            if -1 <= self.xlims[0]-dx < self.currInt-1:
+                self.lastMouseX = event.x
+                
+                # get hi/lo prices before panning
+                tempHi = self.getHighestPrice()
+                tempLo = self.getLowestPrice()
+
+                # shift the xlims
                 self.xlims = [int(round(self.xlims[0]-dx)), int(round(self.xlims[1]-dx))]
                 for ax in self.axes:
                     ax.set_xlim(self.xlims)
-                self.lastMouseX = event.x
-                self.updateHiLevel()
-                self.updateLoLevel()
+
+                # get hi/lo prices after panning
+                newHi = self.getHighestPrice()
+                newLo = self.getLowestPrice()
+                self.updateHiLevel(hi=newHi, lo=newLo)
+                self.updateLoLevel(hi=newHi, lo=newLo)
+
+                # if hi/lo price changed, do a full redraw to redraw axis labels and hi/lo text
+                if tempHi != newHi or tempLo != newLo:
+                    self.fullRedraw = True
+                self.redraw = True
             
 
     def _updateCursorText(self, x):
@@ -278,7 +311,17 @@ class CandlestickChart():
 
     def setTitle(self, title):
         try:
-            self.axes[0].title.set_text(title)
+            #self.axes[0].title.set_text(title)
+            if self.title == None:
+                self.title = self.axes[0].text((self.xlims[0] + self.xlims[1])/2 - 5,
+                                   self.axes[0].get_ylim()[0],
+                                   title,
+                                   fontsize=12,
+                                   color="#cecece")
+            else:
+                self.title.set_text(title)
+                self.title.set_y(self.axes[0].get_ylim()[0]*1.001)
+                self.title.set_x((self.xlims[0] + self.xlims[1])/2 - (self.xlims[1] - self.xlims[0])/6)
         except:
             print("Could not update title")
 
@@ -355,9 +398,19 @@ class CandlestickChart():
             self.xlims = [len(self.ohlc) - 16, len(self.ohlc) + 16]
             for ax in self.axes:
                 ax.set_xlim(self.xlims)
+
+        # set axis lims
+        self._initHiLoLevels()
+        maxVol = max(self.vol[0][max(0, self.xlims[0]):self.xlims[1]])
+        self.axes[1].set_ylim(0, maxVol*1.06)
+            
+        # "save" backgrounds of axes (before actual data and patches are plotted)
+        self.fig.canvas.draw()
+        self.backgrounds = [[self.fig.canvas.copy_from_bbox(ax.bbox), None] for ax in self.axes]
+
+        # draw candlestick and volume charts
         self.currInt = histCnt - 1
         self.drawCandlesticks()
-        self._initHiLoLevels()
         self._initVolBars()
 
         # Load history for indicators
@@ -368,11 +421,12 @@ class CandlestickChart():
             for ind in self.indicators:
                 ind.loadHistory(self.ohlc, data, histCnt)
 
+        # plot indicator data
         for ind in self.indicators:
                 ind.initPlot(self.currInt)
 
-        #self.fig.canvas.draw()
-        #self.backgrounds = [self.fig.canvas.copy_from_bbox(ax.bbox) for ax in self.axes]
+        # draw everything to start
+        self.refresh(fullRedraw=True)
 
         self.loaded = True
         return exDown
@@ -414,6 +468,7 @@ class CandlestickChart():
 
         # update candlestick chart
         self.ohlc.append([self.currInt] + [0]*4)
+        self.timestamps.append([0])
         self.createCandlestick()
 
         # update volume chart
@@ -521,6 +576,7 @@ class CandlestickChart():
             # TODO: REMOVE FALSE
             if False and self.useCBP: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data[:-1]]) / (len(data)-1)
             else: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
+        self.timestamps[self.currInt] = data[0][0][0]
             #self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
 
     def createCandlestick(self):
@@ -533,7 +589,6 @@ class CandlestickChart():
     def drawCandlesticks(self):
         try:
             if self.candlesticks[0]:
-                #self.fig.canvas.restore_region(self.backgrounds[0])
                 self.candlesticks[0][-1].set_ydata([self.ohlc[-1][2], self.ohlc[-1][3]])
                 # open > close
                 if self.ohlc[-1][1] > self.ohlc[-1][4]:
@@ -547,9 +602,6 @@ class CandlestickChart():
                     self.candlesticks[1][-1].set_height(self.ohlc[-1][4] - self.ohlc[-1][1])
                     self.candlesticks[1][-1].set_color(self.green)
                     self.candlesticks[0][-1].set_color(self.green)
-                #self.axes[0].draw_artist(self.candlesticks[0][-1])
-                #self.axes[0].draw_artist(self.candlesticks[1][-1])
-                #self.fig.canvas.blit(self.axes[0].bbox)
             else:
                 self.candlesticks = candle(self.axes[0], self.ohlc, width=0.5, colorup=self.green, colordown=self.red)
         except Exception as e:
@@ -601,8 +653,10 @@ class CandlestickChart():
         newLo = self.getLowestPrice()
         if tempHi != newHi:
             self.updateHiLevel(hi=newHi, lo=newLo)
-        if tempLo != newHi:
+            self.fullRedraw = True
+        if tempLo != newLo:
             self.updateLoLevel(hi=newHi, lo=newLo)
+            self.fullRedraw = True
 
         # update technical indicators
         self.updateIndicators()
@@ -611,9 +665,72 @@ class CandlestickChart():
     def show(self):
         plt.show(block=False)
     
-    def refresh(self):
+    def refresh(self, fullRedraw=False):
         t0 = time.time()
-        self.fig.canvas.draw()      
+        if fullRedraw or self.fullRedraw:
+            self.fig.canvas.draw()
+            self.fullRedraw = False
+        else:
+            # axis 0
+            if self.redraw:
+                self.fig.canvas.restore_region(self.backgrounds[0][0])
+                idx0 = max(0, self.xlims[0])
+                idx1 = min(self.xlims[1]+1, len(self.candlesticks[0]))
+                for i in range(idx0, idx1):
+                    self.axes[0].draw_artist(self.candlesticks[0][i])
+                    self.axes[0].draw_artist(self.candlesticks[1][i])
+                    if i + 2 == idx1:
+                        self.backgrounds[0][1] = self.fig.canvas.copy_from_bbox(self.axes[0].bbox)
+            else:
+                self.fig.canvas.restore_region(self.backgrounds[0][1])
+                idx = min(self.currInt, self.xlims[1]+1)
+                self.axes[0].draw_artist(self.candlesticks[0][idx])
+                self.axes[0].draw_artist(self.candlesticks[1][idx])
+            self.axes[0].draw_artist(self.cursor)
+            self.axes[0].draw_artist(self.cursorText0)
+            self.axes[0].draw_artist(self.title)
+            #self.axes[0].draw_artist(self.hiLine) # position is a percentage from top and never changes
+            #self.axes[0].draw_artist(self.hiText) # does not show
+            #self.axes[0].draw_artist(self.loLine) # position is a percentage from top and never changes
+            #self.axes[0].draw_artist(self.loText) # does not show
+            self.fig.canvas.blit(self.axes[0].bbox)
+            
+            # axis 1
+            if self.redraw:
+                self.fig.canvas.restore_region(self.backgrounds[1][0])
+                idx0 = max(0, self.xlims[0])
+                idx1 = min(self.xlims[1]+1, len(self.volBars[0]))
+                for i in range(idx0, idx1):
+                    self.axes[1].draw_artist(self.volBars[0][i])
+                    if i + 2 == idx1:
+                        self.backgrounds[1][1] = self.fig.canvas.copy_from_bbox(self.axes[1].bbox)
+            else:
+                self.fig.canvas.restore_region(self.backgrounds[1][1])
+                idx = min(self.currInt, self.xlims[1]+1)
+                self.axes[1].draw_artist(self.volBars[0][idx])
+            self.axes[1].draw_artist(self.cursor1)
+            self.axes[1].draw_artist(self.cursorText1)
+            
+            self.axes[1].draw_artist(self.buyEmaPlt)
+            self.axes[1].draw_artist(self.sellEmaPlt)
+            self.axes[1].draw_artist(self.volRatioText)
+            self.fig.canvas.blit(self.axes[1].bbox)
+
+            # indicators
+            for i, ind in enumerate(self.indicators):
+                if self.redraw:
+                    self.fig.canvas.restore_region(self.backgrounds[2+i][0])
+                    ind.drawArtists(self.redraw)
+                    self.backgrounds[2+i][1] = self.fig.canvas.copy_from_bbox(self.axes[2+i].bbox)
+                    ind.drawArtists(False)
+                else:
+                    self.fig.canvas.restore_region(self.backgrounds[2+i][1])
+                    ind.drawArtists(self.redraw)
+                self.fig.canvas.blit(self.axes[2+i].bbox)
+                
+
+            self.redraw = False
+            
         self.fig.canvas.flush_events()
         t1 = time.time()
         #print((t1-t0)*1000)
