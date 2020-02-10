@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.5.2)
+Live Bitcoin chart averaging data from multiple exchanges (v0.5.3)
 
 It's rough right now, but it works
 
@@ -8,7 +8,7 @@ It's rough right now, but it works
 
 ## Requirements/Dependencies
 Dependencies must be manual installed at the moment. 
-* Python 3.x (2.x has not been tested but may work)
+* Python 3.x (2.x has not been tested)
 * matplotlib
 * requests
 

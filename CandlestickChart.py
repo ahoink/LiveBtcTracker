@@ -18,7 +18,7 @@ class CandlestickChart():
 
     def __init__(self, useCBP, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.5.2)")
+        self.fig = plt.figure("Live BTC Tracker (v0.5.3)")
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
@@ -59,7 +59,8 @@ class CandlestickChart():
         self.buyEmaPlt = None
         self.sellEmaPlt = None
         self.showVolBreakdown = False
-        self.legend = []
+        self.legendLabels = []
+        self.legend = None
 
         # price vars
         self.candlesticks = ([],[])
@@ -110,7 +111,7 @@ class CandlestickChart():
             ax.set_xticklabels([])
             ax.set_xlim(self.xlims)
 
-    # ----- Private Functions ----- #
+    # ----- Event Handlers ----- #
     def _handleClose(self, event):
         pass
 
@@ -118,25 +119,15 @@ class CandlestickChart():
         dx = int(event.step)
         while abs(dx) > 0:
             if -1 <= self.xlims[0] + dx < self.currInt - 1:
-                # get hi/lo prices before zooming
-                tempHi = self.getHighestPrice()
-                tempLo = self.getLowestPrice()
+                self._adjustXlims(dx, 0)
 
-                # adjust xlims
-                self.xlims = [self.xlims[0] + dx, self.xlims[1]]
-                for ax in self.axes:
-                    ax.set_xlim(self.xlims)
+                # adjust cursor and text
+                if self.cursorOn:
+                    cx = int(round(event.xdata))
+                    self.cursor.set_xdata([cx, cx])
+                    self.cursor1.set_xdata([cx, cx])
+                    self._updateCursorText(cx)
                     
-                # get hi/lo prices after zooming
-                newHi = self.getHighestPrice()
-                newLo = self.getLowestPrice()
-                self.updateHiLevel(hi=newHi, lo=newLo)
-                self.updateLoLevel(hi=newHi, lo=newLo)
-
-                # if hi/lo price changed, do a full redraw to redraw axis labels and hi/lo text
-                if tempHi != newHi or tempLo != newLo:
-                    self.fullRedraw = True
-                self.redraw = True
                 break
             dx = dx + 1 if dx < 0 else dx - 1
 
@@ -161,7 +152,16 @@ class CandlestickChart():
         self.pan = False
     
     def _mouseMove(self, event):
-        if not self.loaded: return
+        if not self.loaded: return          
+        if self.pan:
+            # (figure width in inches * dots/inch) * plot takes up 77.4% of the figure width = plot width in pixels
+            w = (self.fig.get_size_inches()*self.fig.dpi)[0] * 0.774
+            dx = (event.x - self.lastMouseX) * (self.xlims[1] - self.xlims[0]) / w
+            if abs(dx) < 1: return
+            if -1 <= self.xlims[0]-dx < self.currInt-1:
+                self.lastMouseX = event.x
+                self._adjustXlims(-dx, -dx)               
+
         if self.cursorOn:
             x = int(round(event.xdata))
             # cursor is within bounds of candlestick data - round to nearest interval
@@ -171,53 +171,9 @@ class CandlestickChart():
             self.cursor1.set_xdata([cx, cx])
             self.cursor1.set_ydata([0, max(self.vol[0])*1.1])
             self._updateCursorText(x)
-            
-        if self.pan:
-            # (figure width in inches * dots/inch) * plot takes up 77.4% of the figure width = plot width in pixels
-            w = (self.fig.get_size_inches()*self.fig.dpi)[0] * 0.774
-            dx = (event.x - self.lastMouseX) * (self.xlims[1] - self.xlims[0]) / w
-            if abs(dx) < 1: return
-            if -1 <= self.xlims[0]-dx < self.currInt-1:
-                self.lastMouseX = event.x
-                
-                # get hi/lo prices before panning
-                tempHi = self.getHighestPrice()
-                tempLo = self.getLowestPrice()
 
-                # shift the xlims
-                self.xlims = [int(round(self.xlims[0]-dx)), int(round(self.xlims[1]-dx))]
-                for ax in self.axes:
-                    ax.set_xlim(self.xlims)
 
-                # get hi/lo prices after panning
-                newHi = self.getHighestPrice()
-                newLo = self.getLowestPrice()
-                self.updateHiLevel(hi=newHi, lo=newLo)
-                self.updateLoLevel(hi=newHi, lo=newLo)
-
-                # if hi/lo price changed, do a full redraw to redraw axis labels and hi/lo text
-                if tempHi != newHi or tempLo != newLo:
-                    self.fullRedraw = True
-                self.redraw = True
-            
-
-    def _updateCursorText(self, x):
-        if 0 <= x <= self.currInt:
-            timeStr = time.strftime("%d %b %Y %H:%M", time.localtime(self.timestamps[x]))
-            self.cursorText0.set_text(
-                "%s    Open: %.2f, High: %.2f, Low: %.2f, Close: %.2f" %
-                (timeStr, self.ohlc[x][1], self.ohlc[x][2], self.ohlc[x][3], self.ohlc[x][4]))
-            self.cursorText0.set_y(
-                self.getHighestPrice() + (self.getHighestPrice() - self.getLowestPrice()) * 0.04)
-            self.cursorText0.set_x(self.xlims[0]+0.25)
-            
-            self.cursorText1.set_text("Volume: %.8f (%.1f%% Buys)" % (self.vol[0][x], self.volRatio[x]*100))
-            self.cursorText1.set_y(max(self.vol[0][max(0, self.xlims[0]):min(len(self.vol[0]), self.xlims[1])]))
-            self.cursorText1.set_x(self.xlims[0]+0.25)
-        else:
-            self.cursorText0.set_text("")
-            self.cursorText1.set_text("")
-
+    # ----- Private Functions ----- #
     def _initHiLoLevels(self):
         maxHi = self.getHighestPrice()
         self.hiLine, = self.axes[0].plot(self.xlims,
@@ -243,6 +199,9 @@ class CandlestickChart():
 
         buf = (maxHi - minLo) * 0.12
         self.axes[0].set_ylim(minLo - buf, maxHi + buf)
+
+    def _initCandlesticks(self):
+        self.candlesticks = candle(self.axes[0], self.ohlc, width=0.5, colorup=self.green, colordown=self.red)
 
     def _initVolBars(self):
         numEx = len(self.vol)
@@ -289,19 +248,82 @@ class CandlestickChart():
 
         self.volRatioText = self.axes[1].text(0, 0, "", fontsize=9, color="#cecece")
 
+    def _calcEMAfromHist(self, data, histCnt):
+        numEx = len(data)
+        emaVolStart = min(200, histCnt + self.volEmaPd)
+        
+        # First EMA value is a SMA
+        # calculate SMA for first X intervals of emaX
+        for i in range(self.volEmaPd):
+            idx = emaVolStart-1-i
+            totalVol = sum([float(x[idx][5]) for x in data])
+            if len(data[0][idx]) < 10:
+                self.buyEma[0] += totalVol * 0.5
+                self.sellEma[0] += totalVol * 0.5
+            else:
+                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
+                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
+
+        self.buyEma[0] /= self.volEmaPd
+        self.sellEma[0] /= self.volEmaPd
+
+    def _adjustXlims(self, dx0, dx1):
+        # get hi/lo prices before panning
+        tempHi = self.getHighestPrice()
+        tempLo = self.getLowestPrice()
+
+        # shift the xlims
+        self.xlims = [int(round(self.xlims[0]+dx0)), int(round(self.xlims[1]+dx1))]
+        for ax in self.axes:
+            ax.set_xlim(self.xlims)
+
+        # get hi/lo prices after panning
+        newHi = self.getHighestPrice()
+        newLo = self.getLowestPrice()
+        self.updateHiLevel(hi=newHi, lo=newLo)
+        self.updateLoLevel(hi=newHi, lo=newLo)
+
+        # if hi/lo price changed, do a full redraw to redraw axis labels and hi/lo text
+        if tempHi != newHi or tempLo != newLo:
+            self.fullRedraw = True
+        self.redraw = True           
+
+    def _updateCursorText(self, x):
+        if 0 <= x <= self.currInt:
+            timeStr = time.strftime("%d %b %Y %H:%M", time.localtime(self.timestamps[x]))
+            self.cursorText0.set_text(
+                "%s    Open: %.2f, High: %.2f, Low: %.2f, Close: %.2f" %
+                (timeStr, self.ohlc[x][1], self.ohlc[x][2], self.ohlc[x][3], self.ohlc[x][4]))
+            self.cursorText0.set_y(
+                self.getHighestPrice() + (self.getHighestPrice() - self.getLowestPrice()) * 0.04)
+            self.cursorText0.set_x(self.xlims[0]+0.25)
+            
+            self.cursorText1.set_text("Volume: %.8f (%.1f%% Buys)" % (self.vol[0][x], self.volRatio[x]*100))
+            self.cursorText1.set_y(max(self.vol[0][max(0, self.xlims[0]):min(len(self.vol[0]), self.xlims[1])]))
+            self.cursorText1.set_x(self.xlims[0]+0.25)
+        else:
+            self.cursorText0.set_text("")
+            self.cursorText1.set_text("")
+
 
     # ----- MPL Figure attribute functions ----- #
     def setVolBreakdown(self, show):
         if show:
-            self.setVolumeLegend(self.legend)
+            self.setVolumeLegend(self.legendLabels)
         elif self.showVolBreakdown:
             self.axes[1].get_legend().remove()
         self.showVolBreakdown = show
 
-    def setVolumeLegend(self, legend):
-        self.legend = legend
+    def setVolumeLegend(self, labels):
+        self.legendLabels = labels
         if self.showVolBreakdown:
-            self.axes[1].legend([x[0] for x in self.volBars], legend)
+            self.legend = self.axes[1].legend([x[0] for x in self.volBars], self.legendLabels,
+                                              fancybox=False,
+                                              shadow=False,
+                                              frameon=False,
+                                              loc="lower right")
+            for text in self.legend.get_texts():
+                text.set_color("#cecece")
 
     def setTitle(self, title):
         try:
@@ -313,7 +335,9 @@ class CandlestickChart():
                                    color="#cecece")
             else:
                 self.title.set_text(title)
-                self.title.set_y(self.axes[0].get_ylim()[0]*1.001)
+                ypos = self.axes[0].get_ylim()[0]
+                ypos = ypos + (self.getLowestPrice() - ypos) * 0.2
+                self.title.set_y(ypos)
                 self.title.set_x((self.xlims[0] + self.xlims[1])/2 - (self.xlims[1] - self.xlims[0])/6)
         except:
             print("Could not update title")
@@ -330,8 +354,8 @@ class CandlestickChart():
         self.sellEma = [0]
 
         # calc volume EMAs from history
-        if False and self.useCBP: self.calcEMAfromHist(data[:-1], histCnt) # TODO: REMOVE FALSE
-        else: self.calcEMAfromHist(data, histCnt)
+        if False and self.useCBP: self._calcEMAfromHist(data[:-1], histCnt) # TODO: REMOVE FALSE
+        else: self._calcEMAfromHist(data, histCnt)
 
         exDown = [[] for i in range(numEx)]
         # shift data when needed if exchange was down (to reallign)
@@ -404,7 +428,7 @@ class CandlestickChart():
 
         # draw candlestick and volume charts
         self.currInt = histCnt - 1
-        self.drawCandlesticks()
+        self._initCandlesticks()
         self._initVolBars()
 
         # Load history for indicators
@@ -424,25 +448,6 @@ class CandlestickChart():
 
         self.loaded = True
         return exDown
-
-    def calcEMAfromHist(self, data, histCnt):
-        numEx = len(data)
-        emaVolStart = min(200, histCnt + self.volEmaPd)
-        
-        # First EMA value is a SMA
-        # calculate SMA for first X intervals of emaX
-        for i in range(self.volEmaPd):
-            idx = emaVolStart-1-i
-            totalVol = sum([float(x[idx][5]) for x in data])
-            if len(data[0][idx]) < 10:
-                self.buyEma[0] += totalVol * 0.5
-                self.sellEma[0] += totalVol * 0.5
-            else:
-                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
-                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
-
-        self.buyEma[0] /= self.volEmaPd
-        self.sellEma[0] /= self.volEmaPd
 
 
     # ----- Everything Else --- #
@@ -471,7 +476,9 @@ class CandlestickChart():
         self.volRatio.append(0)
         self.createBar()
         self.buyEma.append(0)
-        self.sellEma.append(0)        
+        self.sellEma.append(0)
+
+        self.redraw = True
 
     # --- Candle/Price related functions --- #
     def updateCandlesticks(self, data):
@@ -491,22 +498,19 @@ class CandlestickChart():
         
     def drawCandlesticks(self):
         try:
-            if self.candlesticks[0]:
-                self.candlesticks[0][-1].set_ydata([self.ohlc[-1][2], self.ohlc[-1][3]])
-                # open > close
-                if self.ohlc[-1][1] > self.ohlc[-1][4]:
-                    self.candlesticks[1][-1].set_y(self.ohlc[-1][4])
-                    self.candlesticks[1][-1].set_height(self.ohlc[-1][1] - self.ohlc[-1][4])
-                    self.candlesticks[1][-1].set_color(self.red)
-                    self.candlesticks[0][-1].set_color(self.red)
-                # open <= close
-                else:
-                    self.candlesticks[1][-1].set_y(self.ohlc[-1][1])
-                    self.candlesticks[1][-1].set_height(self.ohlc[-1][4] - self.ohlc[-1][1])
-                    self.candlesticks[1][-1].set_color(self.green)
-                    self.candlesticks[0][-1].set_color(self.green)
+            self.candlesticks[0][-1].set_ydata([self.ohlc[-1][2], self.ohlc[-1][3]])
+            # open > close
+            if self.ohlc[-1][1] > self.ohlc[-1][4]:
+                self.candlesticks[1][-1].set_y(self.ohlc[-1][4])
+                self.candlesticks[1][-1].set_height(self.ohlc[-1][1] - self.ohlc[-1][4])
+                self.candlesticks[1][-1].set_color(self.red)
+                self.candlesticks[0][-1].set_color(self.red)
+            # open <= close
             else:
-                self.candlesticks = candle(self.axes[0], self.ohlc, width=0.5, colorup=self.green, colordown=self.red)
+                self.candlesticks[1][-1].set_y(self.ohlc[-1][1])
+                self.candlesticks[1][-1].set_height(self.ohlc[-1][4] - self.ohlc[-1][1])
+                self.candlesticks[1][-1].set_color(self.green)
+                self.candlesticks[0][-1].set_color(self.green)              
         except Exception as e:
             print("Could not draw candlesticks:", e)
             
@@ -540,16 +544,6 @@ class CandlestickChart():
         self.axes[0].set_ylim(lo - buf, self.axes[0].get_ylim()[1])
 
     # --- Volume related functions --- #
-    def setVol(self, ex, intvl, val):
-        self.vol[ex][intvl] = val
-        if ex == 0:
-            self.volBars[0][intvl].set_height(val)
-        elif self.showVolBreakdown:
-            self.volBars[ex][intvl].set_height(val)
-
-    def getVol(self, ex, intvl):
-        return self.vol[ex][intvl]
-     
     def updateCurrentVol(self, data):
         numEx = len(data)
         # bar graph is stacked so each vol is the sum of all vols proceeding it
@@ -615,6 +609,16 @@ class CandlestickChart():
             self.volRatioText.set_position((xloc, maxVol*0.99))
         except Exception as e:
            print("Could not draw volume chart:", e)
+           
+    def setVol(self, ex, intvl, val):
+        self.vol[ex][intvl] = val
+        if ex == 0:
+            self.volBars[0][intvl].set_height(val)
+        elif self.showVolBreakdown:
+            self.volBars[ex][intvl].set_height(val)
+
+    def getVol(self, ex, intvl):
+        return self.vol[ex][intvl]
 
     # --- Indicator functions --- #
     def updateIndicators(self, retain=True):
@@ -665,16 +669,24 @@ class CandlestickChart():
         # TODO: Volume breakdown
         if self.redraw:
             self.fig.canvas.restore_region(self.backgrounds[1][0])
+            if self.showVolBreakdown:
+                self.axes[1].draw_artist(self.legend)
             idx0 = max(0, self.xlims[0])
             idx1 = min(self.xlims[1]+1, len(self.volBars[0]))
             for i in range(idx0, idx1):
                 self.axes[1].draw_artist(self.volBars[0][i])
+                if self.showVolBreakdown:
+                    for j in range(1, len(self.volBars)):
+                        self.axes[1].draw_artist(self.volBars[j][i])
                 if i + 2 == idx1:
                     self.backgrounds[1][1] = self.fig.canvas.copy_from_bbox(self.axes[1].bbox)
         else:
             self.fig.canvas.restore_region(self.backgrounds[1][1])
             idx = min(self.currInt, self.xlims[1]+1)
             self.axes[1].draw_artist(self.volBars[0][idx])
+            if self.showVolBreakdown:
+                for j in range(1, len(self.volBars)):
+                    self.axes[1].draw_artist(self.volBars[j][idx])
         self.axes[1].draw_artist(self.cursor1)
         self.axes[1].draw_artist(self.cursorText1)
         self.axes[1].draw_artist(self.buyEmaPlt)
@@ -735,4 +747,3 @@ class CandlestickChart():
         self.fig.canvas.flush_events()
         t1 = time.time()
         #print("%.1f fps" % (1/(t1-t0)))#*1000)
-        #self.show()

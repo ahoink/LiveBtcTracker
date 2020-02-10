@@ -92,13 +92,18 @@ def adjustTimestamps(data, amt):
     return data
 
 def correctData(data, ex, tnow):
+
+    # shift data in case application was launched soon after new interval start
+    if data[0][0] < tnow:
+        data = [[data[0][0] + granularity, data[0][4], data[0][4], data[0][4], data[0][4], 0]] + data
+    
     if ex == "binance":
         data = data[::-1] # binance returns old->new, so reverse it
 
     elif ex == "coinbasepro":
         # shift coinbasepro data until it's "up-to-date"
         while data[0][0] != tnow:
-            data = [[data[0][0] + granularity, 0, 0, 0, 0, 0]] + data
+            data = [[data[0][0] + granularity, data[0][4], data[0][4], data[0][4], data[0][4], 0]] + data
         
     elif ex == "gemini":
         # gemini duplicates timestamps during downtime
@@ -162,12 +167,6 @@ def loadInitData(chart, hist, t):
         exchanges.remove(f)
     useCBP = ("coinbasepro" in exchanges)
     numEx = len(exchanges)
-
-    '''for i in range(numEx):
-        diff = len(candleData[i]) - histPlusEMAPd
-        print(diff)
-        if diff > 0:
-            candleData[i] = candleData[:-diff]'''
        
     # Load history
     exDown = chart.loadHistory(candleData, hist)
@@ -215,13 +214,13 @@ def main():
         if t1 - (t1%granularity) > t:
             t = t1 - (t1%granularity)
             chart.incCurrIntvl()
-        
+
         # Coinbase doesn't update in realtime (every 3-5 minutes)
         if useCBP:
             if candleData[-1][0][0] < t:
                 candleData[-1][0][5] = 0
                 # Update (up to) last 5 candles that may not have been updated
-                past = int(granularity / 300) + 1
+                past = int(300 / granularity) + 1
                 if len(candleData[-1]) >= past:
                     for i in range(past):
                         # calculate the difference in time intervals
@@ -232,9 +231,11 @@ def main():
                             for j in range(numEx-1):
                                 chart.setVol(j, idx, chart.getVol(j,idx) - chart.getVol(-1,idx) + candleData[-1][i][5])
                             chart.setVol(-1,idx,candleData[-1][i][5])
+            #else:
+            if float(cbpPrice["price"]) != 0:
+                candleData[-1][0][4] =  float(cbpPrice["price"])
         elif chart.useCBP: chart.useCBP = False
-            
-        
+
 
         # average price from all exchanges (should weight by volume?)
         # cbp candles don't update in realtime but ticker does
@@ -268,6 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--interval", help="Time interval to track (exchange APIs only allow specific intervals)", required=False, default="1h")
     parser.add_argument("-V", "--vol_breakdown", help="Use if volume bars should be broken down by exchange", action="store_true")
     parser.add_argument("-y", "--history", help="How many time intervals of history to load at start", required=False, type=int, default=100)
+    #parser.add_argument("--idle", help="Update the chart much less often", action="store_true")
     args = vars(parser.parse_args())
 
 
@@ -275,6 +277,7 @@ if __name__ == "__main__":
     volBrkDwn = args["vol_breakdown"]   # Breakdown volume by exchange
     interval = args["interval"]         # Time interval to watch
     hist = args["history"]              # amount of history to load at start
+    #isIdle = args["idle"]
     
     exchanges = ["binance", "okex", "bitfinex", "gemini", "coinbasepro"] # Binance must be first, CBP must be last
     numEx = len(exchanges)

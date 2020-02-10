@@ -21,7 +21,8 @@ class MACD():
 
         self.ax = ax
         self.ax.set_facecolor("#1e1e1e")
-        self.ax.set_ylabel("MACD (%d, %d, %d)" % (self.ema2pd, self.ema1pd, self.ema3pd))
+        self.ax.set_ylabel("MACD (%d, %d, %d)" % (self.ema2pd, self.ema1pd, self.ema3pd),
+                           fontsize=9)
         self.xlims = xlims
                            
         self.green = "#22d615"
@@ -114,6 +115,10 @@ class MACD():
 
             maxMacd = max(self.macd[max(0, self.xlims[0]):self.xlims[1]])
             minMacd = min(self.macd[max(0, self.xlims[0]):self.xlims[1]])
+            maxDeriv = max(self.deriv[max(0, self.xlims[0]):self.xlims[1]])
+            minDeriv = min(self.deriv[max(0, self.xlims[0]):self.xlims[1]])
+            maxMacd = max(maxMacd, maxDeriv)
+            minMacd = min(minMacd, minDeriv)
             buf = (maxMacd - minMacd) * 0.12
             self.ax.set_ylim(min(0, minMacd - buf), max(0, maxMacd+buf))
 
@@ -146,7 +151,7 @@ class RSI():
         
         self.ax = ax
         self.ax.set_facecolor("#1e1e1e")
-        self.ax.set_ylabel("RSI (14)")
+        self.ax.set_ylabel("RSI (14)", fontsize=8)
         self.ax.set_ylim(0, 100)
 
 
