@@ -1,7 +1,32 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from abc import ABC, abstractmethod
 
-class MACD():
+class Indicator(ABC):
+# abstract Indicator class
+# outlines functions required by indicator classes
+
+    @abstractmethod
+    def initPlot(self, i):
+        pass
+
+    @abstractmethod
+    def loadHistory(self, ohlc, data, histCnt):
+        pass
+
+    @abstractmethod
+    def update(self, ohlc, currInt, retain=True):
+        pass
+
+    @abstractmethod
+    def draw(self, currInt):
+        pass
+
+    @abstractmethod
+    def drawArtists(self, redraw):
+        pass
+    
+class MACD(Indicator):
 
     def __init__(self, ax, xlims, ema1=26, ema2=12, ema3=9):
         self.macdBars = []
@@ -136,7 +161,7 @@ class MACD():
             self.ax.draw_artist(self.macdBars[(min(self.xlims[1]+1, len(self.macdBars)-1))])
             self.ax.draw_artist(self.derivLine)
 
-class RSI():
+class RSI(Indicator):
 
     def __init__(self, ax, xlims):
         self.avgGain = 0
@@ -258,8 +283,3 @@ class RSI():
         else:
             self.ax.draw_artist(self.rsiPlot)
             self.ax.draw_artist(self.rsiText)
-        
-        
-            
-        
-        

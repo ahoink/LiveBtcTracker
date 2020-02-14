@@ -285,13 +285,9 @@ if __name__ == "__main__":
     legend = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]
 
     # arg checks
-    if (hist > 100):
-        if hist > 500:
-            print("WARNING: to prevent excessive lag, history has been capped to 500")
-            hist = 500
-        else:
-            print("INFO: Loading a lot of history may increase lag")
-        
+    if (hist > 1405):
+        print("WARNING: Cannot retrieve more than 1405 intervals of history")
+        hist = 1405
 
     if not api.validInterval("binance", interval):
         print("WARNING: %s is not a valid interval" % interval)
