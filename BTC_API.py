@@ -3,6 +3,8 @@ import json
 from datetime import datetime
 import time
 
+COIN = "ETH"
+
 def getDailyVol(ex):
     url = ""
     params=None
@@ -10,23 +12,23 @@ def getDailyVol(ex):
     
     if ex == "binance":
         url = "https://api.binance.com/api/v1/ticker/24hr"
-        params = params={"symbol":"BTCUSDT"}
+        params = params={"symbol":COIN+"USDT"}
         
     elif ex == "bitfinex":
-        url = "https://api.bitfinex.com/v1/stats/btcusd"
+        url = "https://api.bitfinex.com/v1/stats/%susd" % COIN.lower()
         params = {"period":1}
         
     elif ex == "bitstamp":
         url = "https://www.bitstamp.net/api/ticker"
         
     elif ex == "coinbasepro":
-        url = "https://api.pro.coinbase.com/products/BTC-USD/stats"
+        url = "https://api.pro.coinbase.com/products/%s-USD/stats" % COIN
 
     elif ex == "gemini":
-        url = "https://api.gemini.com/v1/pubticker/BTCUSD"
+        url = "https://api.gemini.com/v1/pubticker/%sUSD" % COIN
 
     elif ex == "okex":
-        url = "https://www.okex.com/api/spot/v3/instruments/BTC-USDT/ticker"
+        url = "https://www.okex.com/api/spot/v3/instruments/%s-USDT/ticker" % COIN
 
     try:
         resp = requests.get(url, params=params)
@@ -53,7 +55,7 @@ def getCandle(ex, tint, lim=1, start=None, end=None):
     
     if ex == "binance":
         url = "https://api.binance.com/api/v1/klines"
-        params ={"symbol":"BTCUSDT", "interval":tint, "limit":lim}
+        params ={"symbol":COIN+"USDT", "interval":tint, "limit":lim}
         if start != None and end != None:
             params["startTime"] = start
             params["endTime"] = end
@@ -62,24 +64,24 @@ def getCandle(ex, tint, lim=1, start=None, end=None):
         # because finex is dumb
         if tint == "1d": tint = "1D"
         elif tint == "1w": tint = "7D"
-        url = "https://api-pub.bitfinex.com/v2/candles/trade:%s:tBTCUSD/hist" % tint
+        url = "https://api-pub.bitfinex.com/v2/candles/trade:%s:t%sUSD/hist" % (tint, COIN)
         params={"limit":lim}
 
     elif ex == "coinbasepro":
-        url = "https://api.pro.coinbase.com/products/BTC-USD/candles"
+        url = "https://api.pro.coinbase.com/products/%s-USD/candles" % COIN
         params = {"granularity":granFromInterv(tint)}
         if start != None and end != None:
             params["start"] = start
             params["end"] = end
 
     elif ex == "gemini":
-        url = "https://api.gemini.com/v2/candles/BTCUSD/%s"
+        url = "https://api.gemini.com/v2/candles/%sUSD/%s"
         # because gemini is dumb
         tint = tint.replace("h","hr").replace("d","day")
-        url = url % tint
+        url = url % (COIN, tint)
     
     elif ex == "okex":
-        url = "https://www.okex.com/api/spot/v3/instruments/BTC-USDT/candles"
+        url = "https://www.okex.com/api/spot/v3/instruments/%s-USDT/candles" % COIN
         params = {"granularity":str(granFromInterv(tint))}
         if start != None and end != None:
             params["start"] = start
@@ -150,7 +152,7 @@ def liveTicker(ex):
     params=None
     
     if ex == "coinbasepro":
-        url = "https://api.pro.coinbase.com/products/BTC-USD/ticker"
+        url = "https://api.pro.coinbase.com/products/%s-USD/ticker" % COIN
 
     try:
         resp = requests.get(url, params=params)
@@ -175,19 +177,54 @@ def validInterval(ex, interval):
 
     elif ex == "coinbasepro":
         intervals = ["1m", "5m", "15m", "1h", "6h", "1d"]
-        #grans = [60, 300, 900, 3600, 14400, 86400]
 
     elif ex == "gemini":
         intervals = ["1m", "5m", "15m", "30m", "1h", "6h", "1d"]
         
     elif ex == "okex":
-        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w"]
-        #grans = [60, 180, 300, 900, 1800, 3600, 7200, 14400, 43200, 86400]
+        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"]
 
     else:
         return False
 
     return interval in intervals
+
+def isValidSymbol(ex, symbol):
+    url = ""
+    params = None
+
+    if ex == "binance":
+        url = "https://www.binance.com/api/v3/exchangeInfo"
+    elif ex == "bitfinex":
+        url = "https://api.bitfinex.com/v1/symbols"
+    elif ex == "coinbasepro":
+        url = "https://api.pro.coinbase.com/products"
+    elif ex == "gemini":
+        url = "https://api.gemini.com/v1/symbols"
+    elif ex == "okex":
+        url = "https://www.okex.com/api/spot/v3/instruments"
+
+    try:
+        resp = requests.get(url, params=params)
+    except:
+        print("An error occured while try to communicate with %s" % ex)
+        return False
+
+    resp = resp.json()
+    if ex == "binance":
+        temp = [x for x in resp["symbols"] if x["symbol"] == (symbol + "USDT")]
+        return len(temp) > 0
+    elif ex == "bitfinex":
+        return (symbol.lower() + "usd") in resp
+    elif ex == "coinbasepro":
+        temp = [x for x in resp if x["id"] == (symbol + "-USD")]
+        return len(temp) > 0
+    elif ex == "gemini":
+        return (symbol.lower() + "usd") in resp
+    elif ex == "okex":
+        temp = [x for x in resp if x["instrument_id"] == (symbol + "-USDT")]
+        return len(temp) > 0
+    
 
 def granFromInterv(tint):
     num = int(tint[:-1])

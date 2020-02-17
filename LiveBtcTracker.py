@@ -92,10 +92,6 @@ def adjustTimestamps(data, amt):
     return data
 
 def correctData(data, ex, tnow):
-
-    # shift data in case application was launched soon after new interval start
-    if data[0][0] < tnow:
-        data = [[data[0][0] + granularity, data[0][4], data[0][4], data[0][4], data[0][4], 0]] + data
     
     if ex == "binance":
         data = data[::-1] # binance returns old->new, so reverse it
@@ -139,6 +135,10 @@ def correctData(data, ex, tnow):
                 data = adjustTimestamps(data, 28800)
             else:
                 data = adjustTimestamps(data, -57600)
+                
+    # shift data in case application was launched soon after new interval start
+    if data[0][0] < tnow:
+        data = [[data[0][0] + granularity, data[0][4], data[0][4], data[0][4], data[0][4], 0]] + data
 
     return data
 
@@ -186,13 +186,15 @@ def main():
 
     # ---------- PREPARE TRACKER ---------- #
     # Create chart object that controls all matplotlib related functionality
-    chart = CandlestickChart(useCBP, "MACD", "RSI")
+    chart = CandlestickChart(useCBP, api.COIN, "MACD", "RSI")
     chart.setVolBreakdown(volBrkDwn)
     chart.show()
 
     # Most recent interval start time
     t = time.time()
     t -= (t%granularity)
+    if granularity == 604800:
+        t -= 86400*3
 
     # Get some history and current candle to start
     loadInitData(chart, hist, t)
@@ -212,8 +214,13 @@ def main():
         # check for new interval
         t1 = time.time()
         if t1 - (t1%granularity) > t:
-            t = t1 - (t1%granularity)
-            chart.incCurrIntvl()
+            if granularity == 604800:
+                if t1 - (t%granularity) - 3*86400 > t:
+                    t = t1 - (t1%granularity)
+                    chart.incCurrIntvl()
+            else:    
+                t = t1 - (t1%granularity)
+                chart.incCurrIntvl()
 
         # Coinbase doesn't update in realtime (every 3-5 minutes)
         if useCBP:
@@ -235,7 +242,6 @@ def main():
             if float(cbpPrice["price"]) != 0:
                 candleData[-1][0][4] =  float(cbpPrice["price"])
         elif chart.useCBP: chart.useCBP = False
-
 
         # average price from all exchanges (should weight by volume?)
         # cbp candles don't update in realtime but ticker does
@@ -284,7 +290,7 @@ if __name__ == "__main__":
     granularity = api.granFromInterv(interval)
     legend = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]
 
-    # arg checks
+    # --- arg checks --- #
     if (hist > 1405):
         print("WARNING: Cannot retrieve more than 1405 intervals of history")
         hist = 1405
@@ -307,6 +313,14 @@ if __name__ == "__main__":
             del legend[exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -=1
+
+        elif not api.isValidSymbol(ex, api.COIN):
+            print("WARNING: %s cannot be traded for USD or USDT on %s" % (api.COIN, ex))
+            print("\tThis exchange will not be included in tracking")
+            del legend[exchanges.index(ex)]
+            exchanges.remove(ex)
+            numEx -= 1
+            
     useCBP = ("coinbasepro" in exchanges)
 
 
@@ -319,23 +333,33 @@ if __name__ == "__main__":
     okStats = api.getDailyVol("okex")
 
     totVol = 0
-    if bfxStats != None: totVol += float(bfxStats[0]["volume"])
+    if bfxStats != None:
+        bfxVol = float(bfxStats[0]["volume"])
+        totVol += bfxVol
     #totVol += float(stampStats["volume"])
-    if binStats != None: totVol += float(binStats["volume"])
-    if cbpStats != None: totVol += float(cbpStats["volume"])
-    if gemStats != None: totVol += float(gemStats["volume"]["BTC"])
-    if okStats != None: totVol += float(okStats["base_volume_24h"])
+    if binStats != None:
+        binVol = float(binStats["volume"])
+        totVol += binVol
+    if cbpStats != None:
+        cbpVol = float(cbpStats["volume"])
+        totVol += cbpVol
+    if gemStats != None:
+        gemVol = float(gemStats["volume"][api.COIN])
+        totVol += gemVol
+    if okStats != None:
+        okVol = float(okStats["base_volume_24h"])
+        totVol += okVol
 
     # ---------- Print info ---------- #
-    print("Tracking %d exchanges on the %s interval" % (numEx, interval))
+    print("\nTracking %sUSD on %d exchanges on the %s interval" % (api.COIN, numEx, interval))
     print("Data sources: ", exchanges)
     print("Break down volume bars by exchange: %s" % str(volBrkDwn))
-    print("24 hour volume: %f BTC" % totVol)
-    if bfxStats != None: print("\tBitfinex: %d" % float(bfxStats[0]["volume"]))
-    if binStats != None: print("\tBinance: %d" % float(binStats["volume"]))
-    if cbpStats != None: print("\tCoinbasePro: %d" % float(cbpStats["volume"]))
-    if gemStats != None: print("\tGemini: %d" % float(gemStats["volume"]["BTC"]))
-    if okStats != None: print("\tOKEx: %d" % float(okStats["base_volume_24h"]))
+    print("24 hour volume: %f %s" % (totVol, api.COIN))
+    if bfxStats != None: print("\tBitfinex: %d (%.1f%%)" % (bfxVol, bfxVol / totVol * 100))
+    if binStats != None: print("\tBinance: %d (%.1f%%)" % (binVol, binVol / totVol * 100))
+    if cbpStats != None: print("\tCoinbasePro: %d (%.1f%%)" % (cbpVol, cbpVol / totVol * 100))
+    if gemStats != None: print("\tGemini: %d (%.1f%%)" % (gemVol, gemVol / totVol * 100))
+    if okStats != None: print("\tOKEx: %d (%.1f%%)" % (okVol, okVol / totVol * 100))
 
     # global variable used between threads
     run = True              # flag for running data retreival thread

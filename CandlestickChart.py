@@ -32,9 +32,9 @@ class Colors():
 
 class CandlestickChart():
 
-    def __init__(self, useCBP, *args):
+    def __init__(self, useCBP, coinPair, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.6.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.7.0)", facecolor=Colors.background)
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
@@ -122,7 +122,7 @@ class CandlestickChart():
                                    color=Colors.text)
 
         # volume default attributes
-        self.axes[1].set_ylabel("Volume (BTC)")
+        self.axes[1].set_ylabel("Volume (%s)" % coinPair)
         self.axes[1].set_facecolor(Colors.background)
 
         # price default attributes
@@ -149,7 +149,6 @@ class CandlestickChart():
         if self.loaded:
             self.resaveBG = True
             self.fullRedraw=True
-            self.redraw=True
 
     def _handleScroll(self, event):
         dx = int(event.step)
@@ -252,7 +251,7 @@ class CandlestickChart():
 
         # initialize fib levels
         if self.fibOn:
-            for i in range(5):
+            for i in range(6):
                 temp, = self.axes[0].plot([0,0], [0,0], linestyle="--", color=Colors.fib_levels, linewidth=0.4)
                 temp2 = self.axes[0].text(self.xlims[1]+xpos,0,"",fontsize=9,color=Colors.fib_levels)
                 self.fibs[0].append(temp)
@@ -632,7 +631,7 @@ class CandlestickChart():
                 txt.set_text("")
             return
 
-        m = diff / (max(xh, xl) - min(xh, xl))        
+        m = diff / (xh - xl)        
         b = hi - m*xh
 
         if xh > xl:
@@ -652,6 +651,7 @@ class CandlestickChart():
         self.fibs[0][2].set_data([(fib50_0 - b) / m, self.xlims[1]], [fib50_0, fib50_0])
         self.fibs[0][3].set_data([(fib61_8 - b) / m, self.xlims[1]], [fib61_8, fib61_8])
         self.fibs[0][4].set_data([(fib78_6 - b) / m, self.xlims[1]], [fib78_6, fib78_6])
+        self.fibs[0][5].set_data([(hi - b) / m, (lo - b) / m], [hi, lo])
 
         self.fibs[1][0].set_text("%.2f" % fib23_6)
         self.fibs[1][0].set_position((self.xlims[1]+xpos, fib23_6))
