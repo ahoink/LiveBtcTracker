@@ -1,7 +1,7 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.7.0)
+Live Bitcoin chart averaging data from multiple exchanges (v0.8.0)
 
-It's rough right now, but it works
+It's still in Beta for now, but it works
 
 Can also track altcoins such as Ethereum (ETH) BitcoinCash (BCH) and many more.
 
@@ -32,6 +32,7 @@ Volume information is the sum of all exchanges. Buy volume percentages are based
 * MACD
 * RSI
 * Fibonacci Levels (Toggle with the 'R' key)
+* Bollinger Bands (Toggle with the 'B' key)
 
 ## Example
 ![Example Image of Chart](chartexample.png)

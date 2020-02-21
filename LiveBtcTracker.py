@@ -8,7 +8,6 @@ import BTC_API as api
 
 def retrieveData():
     global lastBfx
-    global run
     global cbpPrice
     global exchanges
     global numEx
@@ -22,34 +21,45 @@ def retrieveData():
     while run:
         ti = time.time()
 
-        # Get candle data from each exchange
+        # Get CoinbasePro live ticker price
         if useCBP:
-            cbpPrice = api.liveTicker("coinbasepro")
+            cbpPrice = api.liveTicker("coinbasepro", SYMBOL)
             if cbpPrice == None:
                 cbpPrice = {"price":0}
                 failures[-1] += 1
+                
+        # Get candle data from each exchange        
         for i in range(numEx):
             # bitfinex api is rate limited to every 3 seconds
             if (exchanges[i] == "bitfinex" and time.time() - lastBfx < 3):
                 continue
-            temp = api.getCandle(exchanges[i], interval)
-            if temp == None:
+
+            temp = api.getCandle(exchanges[i], INTERVAL, SYMBOL)
+            if exchanges[i] == "bitfinex": lastBfx = time.time()
+            
+            # Check if latest data was retrievable
+            if temp == None or (exchanges[i] != "coinbasepro" and temp[0][0] < (time.time() - granularity) and (time.time() % granularity) > 10):
                 failures[i] += 1
                 if failures[i] == 3:
                     print("Stopping requests to %s (Restart to try again)" % exchanges[i])
                 temp = [0]*6
             else:
                 failures[i] = 0
-                candleData[i] = temp
-            if exchanges[i] == "bitfinex": lastBfx = time.time()
-
+                if exchanges[i] == "coinbasepro":
+                    candleData[i][0][2] = max(candleData[i][0][2], float(cbpPrice["price"]))
+                    candleData[i][0][3] = min(candleData[i][0][3], float(cbpPrice["price"]))
+                    candleData[i][0][4] = float(cbpPrice["price"])
+                else:
+                    candleData[i] = temp
+                             
+        # Check if any exchange failed three times in a row
         if 3 in failures:
             exchanges = [ex for ex,f in zip(exchanges, failures) if f < 3]
             candleData = [d for d,f in zip(candleData, failures) if f < 3]
             failures = [f for f in failures if f < 3]  
             numEx = len(exchanges)
             useCBP = ("coinbasepro" in exchanges)
-            
+
         tf = time.time()
         time.sleep(max(0.01, 1-(tf-ti)))
     print("ended")
@@ -73,7 +83,35 @@ def secondsToString(time_s):
         timeStr = "%02d:%02d" % (mns, scs)
     return timeStr
 
+def adjustCBPdata(candleData, chart, t):
+    # Coinbase doesn't update in realtime (every 3-5 minutes)
+    if candleData[-1][0][0] < t:
+        candleData[-1][0][5] = 0
+        # Update (up to) last 5 candles that may not have been updated
+        past = int(300 / granularity) + 1
+        if len(candleData[-1]) >= past:
+            for i in range(past):
+                # calculate the difference in time intervals
+                diff = int((t - candleData[-1][i][0]) / granularity)
+                if chart.currInt >= diff: # must check in case candleData time is 0
+                    idx = chart.currInt - diff
+                    # for each candle, subtract the old vol and add the updated value
+                    for j in range(numEx-1):
+                        chart.setVol(j, idx, chart.getVol(j,idx) - chart.getVol(-1,idx) + candleData[-1][i][5])
+                    chart.setVol(-1,idx,candleData[-1][i][5])
 
+def checkTimeInterval(t):
+    t1 = time.time()
+    if t1 - (t1%granularity) > t:
+        if granularity == 604800:
+            if t1 - (t%granularity) - 3*86400 > t:
+                t1 += 86400*3
+                t = t1 - (t1%granularity)- 3*86400
+                #chart.incCurrIntvl()
+        else:    
+            t = t1 - (t1%granularity)
+            #chart.incCurrIntvl()
+    return t
 
 # ----- These functions are generally only run once ----- #
 def filterDupes(data):
@@ -105,19 +143,19 @@ def correctData(data, ex, tnow):
         # gemini duplicates timestamps during downtime
         data = filterDupes(data)
         # gemini is based on EST
-        if interval == "6h":
+        if INTERVAL == "6h":
             dt = datetime.fromtimestamp(data[-1][0])
             if dt.hour == 6 or dt.hour == 18:
                 data = adjustTimestamps(data,7200)
             else:
                 data = adjustTimestamps(data,-14400)
-        elif interval == "1d":
+        elif INTERVAL == "1d":
             data = adjustTimestamps(data, -14400)
             
     # okex is based on Hong Kong time
     elif ex == "okex":
         isdst = time.localtime().tm_isdst > 0
-        if interval == "6h":
+        if INTERVAL == "6h":
             dt = datetime.fromtimestamp(data[-1][0])
             if not isdst:
                 dt += timedelta(hours=1)
@@ -125,9 +163,9 @@ def correctData(data, ex, tnow):
                 data = adjustTimestamps(data,7200)
             else:
                 data = adjustTimestamps(data,-14400)
-        elif interval == "12h":
+        elif INTERVAL == "12h":
             data = adjustTimestamps(data, -14400)
-        elif interval == "1d":
+        elif INTERVAL == "1d":
             dt = datetime.today()
             if not isdst:
                 dt += timedelta(hours=1)
@@ -137,12 +175,11 @@ def correctData(data, ex, tnow):
                 data = adjustTimestamps(data, -57600)
                 
     # shift data in case application was launched soon after new interval start
-    if data[0][0] < tnow:
+    if tnow - granularity <= data[0][0] < tnow:
         data = [[data[0][0] + granularity, data[0][4], data[0][4], data[0][4], data[0][4], 0]] + data
-
     return data
 
-def loadInitData(chart, hist, t):
+def loadInitData(chart, HISTORY, t):
     global candleData
     global numEx
     global exchanges
@@ -150,26 +187,36 @@ def loadInitData(chart, hist, t):
 
     candleData = []
     failed = []
-    histPlusEMAPd = hist + 26 + 9
+    histPlusEMAPd = HISTORY + 26 + 9 # account for EMA26 and SMA9 of the EMA26 and EMA12 for MACD
     for i in range(numEx):
-        temp = api.getCandle(exchanges[i], interval, histPlusEMAPd)
+        # retrieve history of candle data
+        temp = api.getCandle(exchanges[i], INTERVAL, SYMBOL, histPlusEMAPd)
+
+        # failed to retrieve data from a specific exchange
         if temp is None:
             failed.append(exchanges[i])
             continue
+
+        # could not retrieve as much data as requested
         if len(temp) < histPlusEMAPd:
             print("WARNING: could only retrieve %d intervals of history for %s" % (len(temp), exchanges[i]))
-            hist -= histPlusEMAPd - len(temp)
-            histPlusEMAPd = hist + 26 + 9
-        temp = correctData(temp, exchanges[i], t)
+            HISTORY -= histPlusEMAPd - len(temp)
+            histPlusEMAPd = HISTORY + 26 + 9
+
+        # Correct the retrieved data (typically timestamps) and add it to the candleData
+        temp = correctData(temp, exchanges[i], t)     
         candleData.append(temp)
+       
     lastBfx = time.time()
+
+    # Remove any exchanges that we failed to retrieve data from
     for f in failed:
         exchanges.remove(f)
     useCBP = ("coinbasepro" in exchanges)
     numEx = len(exchanges)
        
     # Load history
-    exDown = chart.loadHistory(candleData, hist)
+    exDown = chart.loadHistory(candleData, HISTORY)
     if any(exDown):
         print("WARNING: The following exchanges were down for a period of time")
         for wasDown,ex in zip(exDown, exchanges):
@@ -182,22 +229,24 @@ def main():
     global candleData
     global exchanges
     global numEx
-    global hist
+    global HISTORY
 
     # ---------- PREPARE TRACKER ---------- #
     # Create chart object that controls all matplotlib related functionality
-    chart = CandlestickChart(useCBP, api.COIN, "MACD", "RSI")
-    chart.setVolBreakdown(volBrkDwn)
+    chart = CandlestickChart(useCBP, SYMBOL, "MACD", "RSI")
+    chart.setVolBreakdown(VOL_BREAK_DOWN)
     chart.show()
 
     # Most recent interval start time
     t = time.time()
-    t -= (t%granularity)
+    if granularity == 604800:   # weeks technically start/end on Thurs 00:00:00 UTC
+        t += 86400*3            # add three days
+    t -= (t%granularity)        # round down to the nearest interval start
     if granularity == 604800:
-        t -= 86400*3
+        t -= 86400*3            # subtract three days to get the nearest past Mon 00:00:00 UTC
 
     # Get some history and current candle to start
-    loadInitData(chart, hist, t)
+    loadInitData(chart, HISTORY, t)
 
     # For some reason, can only show legend AFTER plotting something
     chart.setVolumeLegend(legend)
@@ -210,49 +259,23 @@ def main():
     # ---------- START TRACKER ---------- #
     # Loop to constantly update the current time interval candle and volume bar
     while True:
-        
-        # check for new interval
-        t1 = time.time()
-        if t1 - (t1%granularity) > t:
-            if granularity == 604800:
-                if t1 - (t%granularity) - 3*86400 > t:
-                    t = t1 - (t1%granularity)
-                    chart.incCurrIntvl()
-            else:    
-                t = t1 - (t1%granularity)
-                chart.incCurrIntvl()
 
-        # Coinbase doesn't update in realtime (every 3-5 minutes)
-        if useCBP:
-            if candleData[-1][0][0] < t:
-                candleData[-1][0][5] = 0
-                # Update (up to) last 5 candles that may not have been updated
-                past = int(300 / granularity) + 1
-                if len(candleData[-1]) >= past:
-                    for i in range(past):
-                        # calculate the difference in time intervals
-                        diff = int((t - candleData[-1][i][0]) / granularity)
-                        if chart.currInt >= diff: # must check in case candleData time is 0
-                            idx = chart.currInt - diff
-                            # for each candle, subtract the old vol and add the updated value
-                            for j in range(numEx-1):
-                                chart.setVol(j, idx, chart.getVol(j,idx) - chart.getVol(-1,idx) + candleData[-1][i][5])
-                            chart.setVol(-1,idx,candleData[-1][i][5])
-            #else:
-            if float(cbpPrice["price"]) != 0:
-                candleData[-1][0][4] =  float(cbpPrice["price"])
+        # check for new interval
+        t1 = checkTimeInterval(t)
+        if t != t1:
+            t = t1
+            chart.incCurrIntvl()
+
+        # Adjust for CBP as needed
+        if useCBP: adjustCBPdata(candleData, chart, t)
         elif chart.useCBP: chart.useCBP = False
 
         # average price from all exchanges (should weight by volume?)
-        # cbp candles don't update in realtime but ticker does
-        if useCBP:
-            price = sum([float(x[0][4]) for x in candleData[:-1]])
-            price = (price + float(cbpPrice["price"])) / numEx
-        else:
-            price = sum([float(x[0][4]) for x in candleData]) / numEx
+        price = sum([float(x[0][4]) for x in candleData]) / numEx
 
-        timeLeft = secondsToString(t+granularity-t1)
-        chart.setTitle("$%.2f (%s - %s)" % (price, interval, timeLeft))
+        # set chart title as "<Current Price> <Time interval> <Time left in candle>"
+        timeLeft = secondsToString(t+granularity-time.time())
+        chart.setTitle("$%.2f (%s - %s)" % (price, INTERVAL, timeLeft))
 
         # update all charts with the newest data
         chart.update(candleData)
@@ -275,47 +298,49 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--interval", help="Time interval to track (exchange APIs only allow specific intervals)", required=False, default="1h")
     parser.add_argument("-V", "--vol_breakdown", help="Use if volume bars should be broken down by exchange", action="store_true")
     parser.add_argument("-y", "--history", help="How many time intervals of history to load at start", required=False, type=int, default=100)
+    parser.add_argument("-s", "--symbol", help="The ticker symbol of the coin you want to watch (defaults to BTC)", required=False, default="BTC")
     #parser.add_argument("--idle", help="Update the chart much less often", action="store_true")
     args = vars(parser.parse_args())
 
 
     # CONTROL PARAMETERS
-    volBrkDwn = args["vol_breakdown"]   # Breakdown volume by exchange
-    interval = args["interval"]         # Time interval to watch
-    hist = args["history"]              # amount of history to load at start
+    VOL_BREAK_DOWN = args["vol_breakdown"]  # Breakdown volume by exchange
+    INTERVAL = args["interval"]             # Time interval to watch
+    HISTORY = args["history"]               # amount of history to load at start
+    SYMBOL = args["symbol"].upper()         # the ticker symbol of the asset being tracked
     #isIdle = args["idle"]
     
     exchanges = ["binance", "okex", "bitfinex", "gemini", "coinbasepro"] # Binance must be first, CBP must be last
     numEx = len(exchanges)
-    granularity = api.granFromInterv(interval)
+    granularity = api.granFromInterv(INTERVAL)
     legend = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]
 
     # --- arg checks --- #
-    if (hist > 1405):
+    if (HISTORY > 1405):
         print("WARNING: Cannot retrieve more than 1405 intervals of history")
-        hist = 1405
+        HISTORY = 1405
 
-    if not api.validInterval("binance", interval):
-        print("WARNING: %s is not a valid interval" % interval)
+    if not api.validInterval("binance", INTERVAL):
+        print("WARNING: %s is not a valid interval" % INTERVAL)
         print("\tDefaulting to 1h")
-        interval="1h"
+        INTERVAL="1h"
         granularity = 3600
     tempEx = exchanges[:]
     for ex in tempEx:
-        if not api.validInterval(ex, interval):
-            print("WARNING: %s is not a valid interval for the exchange %s" % (interval, ex))
+        if not api.validInterval(ex, INTERVAL):
+            print("WARNING: %s is not a valid interval for the exchange %s" % (INTERVAL, ex))
             print("\tThis exchange will not be included in tracking")
             del legend[exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -= 1
-        elif ex == "bitfinex" and interval == "1w":
+        elif ex == "bitfinex" and INTERVAL == "1w":
             print("INFO: 1w is a valid interval for bitfinex but will not be included in tracking")
             del legend[exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -=1
 
-        elif not api.isValidSymbol(ex, api.COIN):
-            print("WARNING: %s cannot be traded for USD or USDT on %s" % (api.COIN, ex))
+        elif not api.isValidSymbol(ex, SYMBOL):
+            print("WARNING: %s cannot be traded for USD or USDT on %s" % (SYMBOL, ex))
             print("\tThis exchange will not be included in tracking")
             del legend[exchanges.index(ex)]
             exchanges.remove(ex)
@@ -325,12 +350,12 @@ if __name__ == "__main__":
 
 
     # ---------- 24hr ---------- #
-    bfxStats = api.getDailyVol("bitfinex")
+    bfxStats = api.getDailyVol("bitfinex",SYMBOL)
     #stampStats = api.getDailyVol("bitstamp")
-    binStats = api.getDailyVol("binance")
-    cbpStats = api.getDailyVol("coinbasepro")
-    gemStats = api.getDailyVol("gemini")
-    okStats = api.getDailyVol("okex")
+    binStats = api.getDailyVol("binance", SYMBOL)
+    cbpStats = api.getDailyVol("coinbasepro", SYMBOL)
+    gemStats = api.getDailyVol("gemini", SYMBOL)
+    okStats = api.getDailyVol("okex", SYMBOL)
 
     totVol = 0
     if bfxStats != None:
@@ -344,17 +369,17 @@ if __name__ == "__main__":
         cbpVol = float(cbpStats["volume"])
         totVol += cbpVol
     if gemStats != None:
-        gemVol = float(gemStats["volume"][api.COIN])
+        gemVol = float(gemStats["volume"][SYMBOL])
         totVol += gemVol
     if okStats != None:
         okVol = float(okStats["base_volume_24h"])
         totVol += okVol
 
     # ---------- Print info ---------- #
-    print("\nTracking %sUSD on %d exchanges on the %s interval" % (api.COIN, numEx, interval))
+    print("\nTracking %sUSD on %d exchanges on the %s interval" % (SYMBOL, numEx, INTERVAL))
     print("Data sources: ", exchanges)
-    print("Break down volume bars by exchange: %s" % str(volBrkDwn))
-    print("24 hour volume: %f %s" % (totVol, api.COIN))
+    print("Break down volume bars by exchange: %s" % str(VOL_BREAK_DOWN))
+    print("24 hour volume: %f %s" % (totVol, SYMBOL))
     if bfxStats != None: print("\tBitfinex: %d (%.1f%%)" % (bfxVol, bfxVol / totVol * 100))
     if binStats != None: print("\tBinance: %d (%.1f%%)" % (binVol, binVol / totVol * 100))
     if cbpStats != None: print("\tCoinbasePro: %d (%.1f%%)" % (cbpVol, cbpVol / totVol * 100))
@@ -366,7 +391,6 @@ if __name__ == "__main__":
     lastBfx = 0             # finex has a lower rate limit, keep track of last call
     candleData = []         # TOHLCV candlestick data for each exchange
     cbpPrice = {"price":0}  # keep track of real-time CBP price - candlestick API doesn't update as often
-
     main()
 
     print("Done.")

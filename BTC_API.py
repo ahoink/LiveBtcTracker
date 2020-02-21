@@ -3,9 +3,7 @@ import json
 from datetime import datetime
 import time
 
-COIN = "ETH"
-
-def getDailyVol(ex):
+def getDailyVol(ex, COIN="BTC"):
     url = ""
     params=None
     resp = {}
@@ -42,7 +40,7 @@ def getDailyVol(ex):
         
     return resp.json()
 
-def getCandle(ex, tint, lim=1, start=None, end=None):
+def getCandle(ex, tint, COIN="BTC", lim=1, start=None, end=None):
     url = ""
     params=None
     ret = None
@@ -147,7 +145,7 @@ def getCandle(ex, tint, lim=1, start=None, end=None):
         
     return resp
 
-def liveTicker(ex):
+def liveTicker(ex, COIN="BTC"):
     url = ""
     params=None
     
@@ -182,8 +180,8 @@ def validInterval(ex, interval):
         intervals = ["1m", "5m", "15m", "30m", "1h", "6h", "1d"]
         
     elif ex == "okex":
-        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"]
-
+        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "12h", "1d"]
+        # 6h and 1w are valid
     else:
         return False
 

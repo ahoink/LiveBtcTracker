@@ -66,7 +66,7 @@ class MACD(Indicator):
 
     def calcEMAfromHistory(self, data, histCnt):
         numEx = len(data)
-        ema1Start = min(200, histCnt + self.ema1pd+self.ema3pd)
+        ema1Start = histCnt + self.ema1pd+self.ema3pd
         ema2Start = min(ema1Start - (self.ema1pd-self.ema2pd), histCnt + self.ema2pd+self.ema3pd)
         
         # First EMA value is a SMA

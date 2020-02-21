@@ -90,6 +90,10 @@ class CandlestickChart():
         self.title = None
         self.fibs = [[],[]]
         self.fibOn = True
+        self.bbandsPlt = [None, None, None]
+        self.bbands = [[],[],[]]
+        self.last20 = []
+        self.bbandOn = True
 
         # misc vars
         self.timestamps = []                # store epoch timestamps of every interval
@@ -177,6 +181,12 @@ class CandlestickChart():
                 self.updateFibLevels()
                 
             self.fullRedraw = True
+        elif event.key == "b":
+            if self.bbandOn:
+                self.bbandOn = False
+            else:
+                self.bbandOn = True
+                self.drawBBands(update=True)
 
     def _mouseClick(self, event):
         self.pan = True
@@ -260,6 +270,11 @@ class CandlestickChart():
     def _initCandlesticks(self):
         self.candlesticks = candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
 
+    def _initBBands(self):
+        self.bbandsPlt[0], = self.axes[0].plot(range(self.currInt+1), self.bbands[0][1:], color=Colors.blue, linewidth=0.6)
+        self.bbandsPlt[1], = self.axes[0].plot(range(self.currInt+1), self.bbands[1][1:], color=Colors.blue, linestyle=(0,(5,10)), linewidth=0.6)
+        self.bbandsPlt[2], = self.axes[0].plot(range(self.currInt+1), self.bbands[2][1:], color=Colors.blue, linewidth=0.6)
+        
     def _initVolBars(self):
         numEx = len(self.vol)
         self.volBars.append(self.axes[1].bar(
@@ -307,20 +322,37 @@ class CandlestickChart():
 
     def _calcEMAfromHist(self, data, histCnt):
         numEx = len(data)
-        emaVolStart = min(200, histCnt + self.volEmaPd)
+        emaVolStart = histCnt + self.volEmaPd
+        smaBBandStart = histCnt + 20
+        sumPd = 0
+        sqSum = 0
         
         # First EMA value is a SMA
         # calculate SMA for first X intervals of emaX
-        for i in range(self.volEmaPd):
-            idx = emaVolStart-1-i
-            totalVol = sum([float(x[idx][5]) for x in data])
-            if len(data[0][idx]) < 10:
-                self.buyEma[0] += totalVol * 0.5
-                self.sellEma[0] += totalVol * 0.5
-            else:
-                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
-                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
+        for i in range(max(self.volEmaPd, 20)):
+            if i < self.volEmaPd:
+                idx = emaVolStart-1-i
+                totalVol = sum([float(x[idx][5]) for x in data])
+                if len(data[0][idx]) < 10:
+                    self.buyEma[0] += totalVol * 0.5
+                    self.sellEma[0] += totalVol * 0.5
+                else:
+                    self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
+                    self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
+            idx = smaBBandStart-1-i
+            temp = sum([float(x[idx][4]) for x in data if x[idx][4] != 0]) / len([float(x[idx][4]) for x in data if x[idx][4] != 0])
+            self.last20.append(temp)
+            sumPd += temp
+            sqSum += temp * temp
 
+        mean = sumPd / 20
+        var = sqSum / 20 - mean * mean
+        stdev = var**0.5
+        self.bbands[0].append(mean+stdev*2)
+        self.bbands[1].append(mean)
+        self.bbands[2].append(mean-stdev*2)
+            
+            
         self.buyEma[0] /= self.volEmaPd
         self.sellEma[0] /= self.volEmaPd
 
@@ -438,17 +470,21 @@ class CandlestickChart():
                 if data[j][idx][0] < avgT:
                     invalid.append(data[j])
                     exDown[j].append(i)
-            #invalid = [x for x in data if x[idx][0] < avgT]
+            # sometimes Binance trading will be down even when the API is active. Check for volume
+            if len(data[0][idx]) >= 10 and float(data[0][idx][5]) == 0:
+                invalid.append(data[0])
+                exDown[0].append(i)
 
             # sum volume from all exchanges
             for j in range(numEx):           
                 self.vol[j].append( sum([float(x[idx][5]) for x in data[j:] if x not in invalid]))
 
             # calc buy volume percentage
-            if len(data[0][0]) < 10 or data[0] in invalid:
+            # ignore if binance isn't being tracked, or server is down, or has no volume
+            if len(data[0][idx]) < 10 or data[0] in invalid or float(data[0][idx][5]) == 0:
                 self.volRatio.append(0.5)
             else:
-                self.volRatio.append( (float(data[0][idx][9]) / float(data[0][idx][5])))
+                self.volRatio.append( (float(data[0][idx][9]) / float(data[0][idx][5])) )
 
             # update volume EMAs
             self.buyEma.append((self.volRatio[i] * self.vol[0][i]) * self.volEmaWt +\
@@ -468,6 +504,15 @@ class CandlestickChart():
                     sum([float(x[idx][j]) for x in data if x not in invalid]) /\
                     (len(data)-len(invalid))
 
+            # BBands
+            self.last20 = self.last20[1:] + [self.ohlc[i][4]]
+            newMean = sum(self.last20) / 20
+            sqSum = sum([(x-newMean)**2 for x in self.last20])
+            newStdev = (sqSum / 20)**0.5
+
+            self.bbands[0].append(newMean+newStdev*2)
+            self.bbands[1].append(newMean)
+            self.bbands[2].append(newMean-newStdev*2)
 
         # initialize chart objects
         if len(self.ohlc) != 100:
@@ -491,6 +536,7 @@ class CandlestickChart():
         # draw candlestick and volume charts
         self.currInt = histCnt - 1
         self._initCandlesticks()
+        self._initBBands()
         self._initVolBars()
         self.updateFibLevels()
 
@@ -519,6 +565,9 @@ class CandlestickChart():
         for ind in self.indicators:
             ind.update(self.ohlc, self.currInt, retain=False)
 
+        # make sure bbands are updated
+        self.updateBBands(update=True)
+
         # update chart limits
         self.currInt += 1
         if self.currInt >= self.xlims[1]-1:
@@ -531,7 +580,14 @@ class CandlestickChart():
         # update candlestick chart
         self.ohlc.append([self.currInt] + [0]*4)
         self.timestamps.append([0])
+        self.bbands[0].append(self.bbands[0][-1])
+        self.bbands[1].append(self.bbands[1][-1])
+        self.bbands[2].append(self.bbands[2][-1])
         self.createCandlestick()
+
+        # make sure bbands are updated and drawn
+        self.updateBBands(update=True)
+        self.drawBBands(update=True)
 
         # update volume chart
         for v in self.vol:
@@ -664,6 +720,31 @@ class CandlestickChart():
         self.fibs[1][4].set_text("%.2f" % fib78_6)
         self.fibs[1][4].set_position((self.xlims[1]+xpos, fib78_6))
 
+    def updateBBands(self, update=False):
+
+        # avoid doing a costly calculation unless the new value is more than one stdev away
+        stdev = (self.bbands[0][-1] - self.bbands[1][-1])/2
+        if not update and abs(self.ohlc[self.currInt][4] - self.last20[-1]) < stdev: return
+
+        self.last20[-1] = self.ohlc[self.currInt][4]
+        newMean = sum(self.last20) / 20
+        sqSum = sum([(x-newMean)**2 for x in self.last20])
+        newStdev = (sqSum / 20)**0.5
+
+        self.bbands[0][-1] = (newMean+newStdev*2)
+        self.bbands[1][-1] = (newMean)
+        self.bbands[2][-1] = (newMean-newStdev*2)
+
+    def drawBBands(self, update=False):
+        if not self.bbandOn: return
+        
+        #stdev = (self.bbands[0][-1] - self.bbands[1][-1])/2
+        #if not update and abs(self.ohlc[self.currInt][4] - self.last20[-1]) < stdev: return
+        
+        for bbp, bb in zip(self.bbandsPlt, self.bbands):
+            bbp.set_data(range(self.currInt+1), bb[1:])
+
+
     # --- Volume related functions --- #
     def updateCurrentVol(self, data):
         numEx = len(data)
@@ -671,7 +752,7 @@ class CandlestickChart():
         # (i.e. vol[0] is sum of all exchanges, vol[-1] is the volume of a single exchange)
         for i in range(numEx):
             self.vol[i][self.currInt] = sum([float(x[0][5]) for x in data[i:]])
-        if len(data[0][0]) < 10:    # in case binance data isn't included
+        if len(data[0][0]) < 10 or float(data[0][0][5]) == 0:    # in case binance data isn't included
             self.volRatio[self.currInt] = 0.5
         else:
             self.volRatio[self.currInt] = (float(data[0][0][9]) / float(data[0][0][5]))
@@ -803,9 +884,13 @@ class CandlestickChart():
             self.axes[0].draw_artist(self.candlesticks[1][idx])
             
         # draw the remaining chart objects (cursor, text, etc.)
-        self.axes[0].draw_artist(self.cursor)
-        self.axes[0].draw_artist(self.cursorText0)
         self.axes[0].draw_artist(self.title)
+        if self.cursorOn:
+            self.axes[0].draw_artist(self.cursor)
+            self.axes[0].draw_artist(self.cursorText0)
+        if self.bbandOn:
+            for bband in self.bbandsPlt:
+                self.axes[0].draw_artist(bband)        
 
         # blit the canvas within the axis bounding box to refresh with the redrawn objects
         self.fig.canvas.blit(self.axes[0].bbox)
@@ -833,8 +918,9 @@ class CandlestickChart():
             if self.showVolBreakdown:
                 for j in range(1, len(self.volBars)):
                     self.axes[1].draw_artist(self.volBars[j][idx])
-        self.axes[1].draw_artist(self.cursor1)
-        self.axes[1].draw_artist(self.cursorText1)
+        if self.cursorOn:
+            self.axes[1].draw_artist(self.cursor1)
+            self.axes[1].draw_artist(self.cursorText1)
         self.axes[1].draw_artist(self.buyEmaPlt)
         self.axes[1].draw_artist(self.sellEmaPlt)
         self.axes[1].draw_artist(self.volRatioText)
@@ -872,6 +958,8 @@ class CandlestickChart():
             self.updateLoLevel(hi=newHi, lo=newLo)
             self.updateFibLevels(hi=newHi, lo=newLo)
             self.fullRedraw = True
+        self.updateBBands()
+        self.drawBBands()
 
         # update technical indicators
         self.updateIndicators()
@@ -885,8 +973,8 @@ class CandlestickChart():
 
         # resave the background (figure was resized)
         if self.resaveBG:
-                self.resaveBackground()
-                self.resaveBG = False
+            self.resaveBackground()
+            self.resaveBG = False
                 
         # fullRedraw redraws everything on the figure (objects out of view, axes, titles, text, etc.)
         elif fullRedraw or self.fullRedraw:
