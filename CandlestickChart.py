@@ -34,7 +34,7 @@ class CandlestickChart():
 
     def __init__(self, useCBP, coinPair, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.7.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.8.0)", facecolor=Colors.background)
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
