@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.8.0)
+Live Bitcoin chart averaging data from multiple exchanges (v0.9.0)
 
 It's still in Beta for now, but it works
 
@@ -31,6 +31,7 @@ Volume information is the sum of all exchanges. Buy volume percentages are based
 ### Technical Indicators
 * MACD
 * RSI
+* OBV
 * Fibonacci Levels (Toggle with the 'R' key)
 * Bollinger Bands (Toggle with the 'B' key)
 

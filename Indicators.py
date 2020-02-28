@@ -5,25 +5,44 @@ from abc import ABC, abstractmethod
 class Indicator(ABC):
 # abstract Indicator class
 # outlines functions required by indicator classes
+    @abstractmethod
+    def __init__(self, ax):
+        # Set any attributes needed for the indicator
+        pass
 
     @abstractmethod
     def initPlot(self, i):
+        # plot data calculated in loadHistory on indicator axis
+        # store the chart object (artist) as an attribute
         pass
 
     @abstractmethod
-    def loadHistory(self, ohlc, data, histCnt):
+    def loadHistory(self, ohlc, data, vol, histCnt):
+        # Calculate the indicator history using history data
+        # store data as class attribute
         pass
 
     @abstractmethod
-    def update(self, ohlc, currInt, retain=True):
+    def update(self, ohlc, vol, currInt, retain=True):
+        # update the most recent data point
+        # if not retain:
+        #   <time period incremented>
+        #   permanently store the most recent data point
+        #   append new data point
         pass
 
     @abstractmethod
     def draw(self, currInt):
+        # Update the chart object with the recently updated data point
         pass
 
     @abstractmethod
     def drawArtists(self, redraw):
+        # Actually perform the drawing function
+        # if redraw:
+        #   draw artists that DON'T get redrawn every frame
+        # else:
+        #   draw artists that DO get redrawn every frame
         pass
     
 class MACD(Indicator):
@@ -74,11 +93,12 @@ class MACD(Indicator):
         for i in range(self.ema1pd):
             # price ema 1
             idx = ema1Start-1-i
-            self.ema1 += sum([float(x[idx][4]) for x in data]) / numEx
+            temp = [float(x[idx][4]) for x in data if x[idx][-1]] # data has been modified so last element is bool classifying its validity
+            self.ema1 += sum(temp) / len(temp)
             # price ema 2
             if i < self.ema2pd:
                 idx = ema2Start-1-i
-                self.ema2 += sum([float(x[idx][4]) for x in data]) / numEx
+                self.ema2 += sum(temp) / len(temp)#sum([float(x[idx][4]) for x in data]) / numEx
             
         self.ema1 /= self.ema1pd
         self.ema2 /= self.ema2pd
@@ -87,14 +107,17 @@ class MACD(Indicator):
         # calculate SMA of (ema2-ema1)
         for i in range(self.ema3pd-1,0,-1):
             idx = histCnt+i
-            p = sum([float(x[idx][4]) for x in data]) / numEx
+            temp = [float(x[idx][4]) for x in data if x[idx][-1]]
+            p = sum(temp) / len(temp)
+            # ema = price * ema_weight + prev_ema * (1 - ema_weight)
             self.ema1 = p * self.ema1Wt + self.ema1 * (1 - self.ema1Wt)
             self.ema2 = p * self.ema2Wt + self.ema2 * (1 - self.ema2Wt)
             self.ema3 += (self.ema2 - self.ema1)
         self.ema3 /= self.ema3pd
 
-    def loadHistory(self, ohlc, data, histCnt):
-
+    def loadHistory(self, ohlc, data, vol, histCnt):
+        # MACD = EMA_9 of (EMA_12 - EMA_26)
+        # Derivative = (MACD_i+2 - MACD_i) / 2
         # calculate EMAs for history data before displayed data
         self.calcEMAfromHistory(data, histCnt)
 
@@ -111,7 +134,7 @@ class MACD(Indicator):
             if i >= 2:
                 self.deriv.append((self.macd[i] - self.macd[i-2]) / 2)
 
-    def update(self, ohlc, currInt, retain=True):
+    def update(self, ohlc, vol, currInt, retain=True):
         tempEMA1 = ohlc[currInt][4] * self.ema1Wt + self.ema1 * (1 - self.ema1Wt)
         tempEMA2 = ohlc[currInt][4] * self.ema2Wt + self.ema2 * (1 - self.ema2Wt)
         tempEMA3 = (tempEMA2 - tempEMA1) * self.ema3Wt + self.ema3 * (1 - self.ema3Wt)
@@ -138,6 +161,7 @@ class MACD(Indicator):
             else:
                 self.macdBars[currInt].set_color(self.green)
 
+            # find min and max values being plotted to set the bounds of the y-axis
             maxMacd = max(self.macd[max(0, self.xlims[0]):self.xlims[1]])
             minMacd = min(self.macd[max(0, self.xlims[0]):self.xlims[1]])
             maxDeriv = max(self.deriv[max(0, self.xlims[0]):self.xlims[1]])
@@ -196,15 +220,21 @@ class RSI(Indicator):
         #print(self.over_fill[0])
 
         
-    def loadHistory(self, ohlc, data, histCnt):
-
+    def loadHistory(self, ohlc, data, vol, histCnt):
+        #                        100
+        # RSI = 100  -   --------------------
+        #               (1 + avgGain/avgLoss)
+        #
         # calculate rsi for history data that occurs before the displayed data
         n = min([len(d) for d in data]) #(data[0])
         for i in range(n - histCnt):
             idx = n-i-1
-            tempOpen = sum([float(x[idx][1]) for x in data]) / len(data)
-            tempClose = sum([float(x[idx][4]) for x in data]) / len(data)
+            temp = [float(x[idx][1]) for x in data if x[idx][-1]] # data has been modified so last element is bool classifying the validity
+            tempOpen = sum(temp) / len(temp)
+            temp = [float(x[idx][4]) for x in data if x[idx][-1]]
+            tempClose = sum(temp) / len(temp)
             diff = tempClose - tempOpen
+            # find average of first 14 periods
             if i < 14:
                 if diff < 0:
                     self.avgLoss -= diff
@@ -213,6 +243,7 @@ class RSI(Indicator):
                 if i == 13:
                     self.avgGain /= 14
                     self.avgLoss /= 14
+            # remaining periods = (prev_avg * 13 + current_diff) / 14
             else:
                 if diff < 0:
                     self.avgLoss = (self.avgLoss * 13 - diff)
@@ -237,7 +268,7 @@ class RSI(Indicator):
             self.avgLoss /= 14
             self.rsi.append(100 - (100 / (1 + (self.avgGain / self.avgLoss))))
 
-    def update(self, ohlc, currInt, retain=True):
+    def update(self, ohlc, vol, currInt, retain=True):
         tempGain = 0
         tempLoss = 0
         diff = ohlc[currInt][4] - ohlc[currInt][1]
@@ -283,3 +314,58 @@ class RSI(Indicator):
         else:
             self.ax.draw_artist(self.rsiPlot)
             self.ax.draw_artist(self.rsiText)
+
+class OBV(Indicator):
+    def __init__(self, ax, xlims):
+        self.obv = []
+        self.obvPlt = None
+        self.xlims = xlims
+
+        self.ax = ax
+        self.ax.set_facecolor("#1e1e1e")
+        self.ax.set_ylabel("OBV", fontsize=8)
+        self.ax.set_yticklabels([])
+        
+    def initPlot(self, i):
+        self.obvPlt, = self.ax.plot(range(i+1), self.obv, "-", linewidth=0.9)
+        self.ax.set_ylim(
+            min(self.obv[self.xlims[0]:min(len(self.obv), self.xlims[1])]),
+            max(self.obv[self.xlims[0]:min(len(self.obv), self.xlims[1])]))
+
+    def loadHistory(self, ohlc, data, vol, histCnt):
+        # OBV = prev_OBV - Volume     if red candle
+        #        or
+        # OBV = prevOBV + Volume      if green candle
+        self.obv.append(0)
+        for p,v in zip(ohlc, vol):
+            temp = self.obv[-1]
+            if p[4] > p[1]:
+                self.obv.append(temp+v)
+            elif p[4] < p[1]:
+                self.obv.append(temp-v)
+            else:
+                self.obv.append(temp)
+        self.obv = self.obv[1:]
+
+    def update(self, ohlc, vol, currInt, retain=True):
+        if ohlc[currInt][4] > ohlc[currInt][1]:
+            self.obv[currInt] = self.obv[currInt-1] + vol[currInt]
+        elif ohlc[currInt][4] < ohlc[currInt][1]:
+            self.obv[currInt] = self.obv[currInt-1] - vol[currInt]
+        else:
+            self.obv[currInt] = self.obv[currInt-1]
+
+        if not retain:
+            self.obv.append(0)
+
+    def draw(self, currInt):
+        self.obvPlt.set_data(range(currInt+1), self.obv)
+        self.ax.set_ylim(
+            min(self.obv[max(0, self.xlims[0]):min(len(self.obv), self.xlims[1])]),
+            max(self.obv[max(0, self.xlims[0]):min(len(self.obv), self.xlims[1])]))
+
+    def drawArtists(self, redraw):
+        if redraw:
+            pass
+        else:
+            self.ax.draw_artist(self.obvPlt)

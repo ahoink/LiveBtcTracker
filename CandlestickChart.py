@@ -11,8 +11,7 @@ from matplotlib.finance import candlestick_ohlc as candle
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 
-from Indicators import MACD
-from Indicators import RSI
+from Indicators import *
 
 class Colors():
 
@@ -34,7 +33,7 @@ class CandlestickChart():
 
     def __init__(self, useCBP, coinPair, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.8.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.9.0)", facecolor=Colors.background)
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
@@ -116,6 +115,8 @@ class CandlestickChart():
                 self.indicators.append(MACD(self.axes[2+i], self.xlims))
             elif lowArg == "rsi":
                 self.indicators.append(RSI(self.axes[2+i], self.xlims))
+            elif lowArg == "obv":
+                self.indicators.append(OBV(self.axes[2+i], self.xlims))
             else:
                 print("WARNING: No indicator named '%s'" % arg)
 
@@ -402,6 +403,29 @@ class CandlestickChart():
     def _pixelsToPoints(self, px):
         return px * (self.xlims[1]-self.xlims[0]) / self._getPlotWidthPixels()
 
+    def _checkTimestamps(self, data, histCnt):
+        numEx = len(data)
+        fullHist = min([len(x) for x in data])
+        medT = [x[fullHist-1][0] for x in data][int(numEx/2)]
+        medT2 = [x[fullHist-2][0] for x in data][int(numEx/2)]
+        gran = medT2 - medT
+
+        newData = [[] for x in data]
+        expectedTimestamp = medT + gran * (fullHist-1)
+        # shift data when needed if exchange was down (to reallign)
+        for i in range(fullHist):
+            #avgT = sum([x[i][0] for x in data]) / numEx
+            for j in range(numEx):
+                # timestamp is less than the average
+                if data[j][i][0] != expectedTimestamp:#avgT:
+                    # add a dummy entry to shift the data
+                    data[j] = data[j][:i] + [[0]*6] + data[j][i:]
+                    newData[j].append([0]*6 + [False])
+                else:
+                    newData[j].append(data[j][i] + [True])
+            expectedTimestamp -= gran
+        return newData
+
 
     # ----- MPL Figure attribute functions ----- #
     def setVolBreakdown(self, show):
@@ -448,14 +472,7 @@ class CandlestickChart():
         else: self._calcEMAfromHist(data, histCnt)
 
         exDown = [[] for i in range(numEx)]
-        # shift data when needed if exchange was down (to reallign)
-        for i in range(histCnt):
-            avgT = sum([x[i][0] for x in data]) / numEx
-            for j in range(numEx):
-                # timestamp is less than the average
-                if data[j][i][0] < avgT:
-                    # add a dummy entry to shift the data
-                    data[j] = data[j][:i] + [[0]*6] + data[j][i:]
+        data = self._checkTimestamps(data, histCnt)
                     
         # traverse history from old to new data
         for i in range(histCnt):
@@ -467,7 +484,7 @@ class CandlestickChart():
             invalid = []
             avgT = sum([x[idx][0] for x in data]) / numEx
             for j in range(numEx):
-                if data[j][idx][0] < avgT:
+                if not data[j][idx][-1]:#data[j][idx][0] < avgT:
                     invalid.append(data[j])
                     exDown[j].append(i)
             # sometimes Binance trading will be down even when the API is active. Check for volume
@@ -543,10 +560,10 @@ class CandlestickChart():
         # Load history for indicators
         if False and self.useCBP: # TODO: REMOVE FALSE
             for ind in self.indicators:
-                ind.loadHistory(self.ohlc, data[:-1], histCnt)
+                ind.loadHistory(self.ohlc, data[:-1], self.vol[0], histCnt)
         else:
             for ind in self.indicators:
-                ind.loadHistory(self.ohlc, data, histCnt)
+                ind.loadHistory(self.ohlc, data, self.vol[0], histCnt)
 
         # plot indicator data
         for ind in self.indicators:
@@ -563,7 +580,7 @@ class CandlestickChart():
     def incCurrIntvl(self):
         # update indicators
         for ind in self.indicators:
-            ind.update(self.ohlc, self.currInt, retain=False)
+            ind.update(self.ohlc, self.vol[0], self.currInt, retain=False)
 
         # make sure bbands are updated
         self.updateBBands(update=True)
@@ -825,7 +842,7 @@ class CandlestickChart():
     # --- Indicator functions --- #
     def updateIndicators(self, retain=True):
         for ind in self.indicators:
-            ind.update(self.ohlc, self.currInt, retain)
+            ind.update(self.ohlc, self.vol[0], self.currInt, retain)
         
     def drawIndicators(self):
         for ind in self.indicators:

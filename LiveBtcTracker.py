@@ -233,7 +233,7 @@ def main():
 
     # ---------- PREPARE TRACKER ---------- #
     # Create chart object that controls all matplotlib related functionality
-    chart = CandlestickChart(useCBP, SYMBOL, "MACD", "RSI")
+    chart = CandlestickChart(useCBP, SYMBOL, "MACD", "RSI", "OBV")
     chart.setVolBreakdown(VOL_BREAK_DOWN)
     chart.show()
 

@@ -121,7 +121,7 @@ def getCandle(ex, tint, COIN="BTC", lim=1, start=None, end=None):
         return ret
     elif ex == "binance" and lim > 1000:
         startT = oldestTS - granFromInterv(tint)*min((lim-999),1001)*1000
-        resp2 = getCandle(ex, tint, lim=lim-1000, start=startT, end=oldestTS)
+        resp2 = getCandle(ex, tint, COIN=COIN, lim=lim-1000, start=startT, end=oldestTS)
         resp = resp2 + resp # binance is in reverse order, so resp comes first
     elif ex == "coinbasepro":
         # reorder from [t lhoc v] -> [t ohlc v]
@@ -135,12 +135,12 @@ def getCandle(ex, tint, COIN="BTC", lim=1, start=None, end=None):
             startT = datetime.utcfromtimestamp(oldestTS - granFromInterv(tint) * min(lim-299,301)).isoformat()
             endT = datetime.utcfromtimestamp(oldestTS - granFromInterv(tint)).isoformat()
             time.sleep(0.3) # make sure we don't get rate lmiited
-            resp2 = getCandle(ex, tint, lim=lim-300, start=startT, end=endT)
+            resp2 = getCandle(ex, tint, COIN=COIN, lim=lim-300, start=startT, end=endT)
             ret += resp2
         return ret
     elif ex == "okex" and lim > 200:
         time.sleep(0.1) # make sure we don't get rate limited
-        resp2 = getCandle(ex, tint, lim=lim-200, start="2014-01-01T00:00:00.000Z", end=oldestTS)
+        resp2 = getCandle(ex, tint, COIN=COIN, lim=lim-200, start="2014-01-01T00:00:00.000Z", end=oldestTS)
         resp += resp2
         
     return resp
