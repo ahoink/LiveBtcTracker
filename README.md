@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.9.0)
+Live Bitcoin chart averaging data from multiple exchanges (v0.9.1)
 
 It's still in Beta for now, but it works
 
@@ -11,7 +11,7 @@ Can also track altcoins such as Ethereum (ETH) BitcoinCash (BCH) and many more.
 ## Requirements/Dependencies
 Dependencies must be manual installed at the moment. 
 * Python 3.x
-* matplotlib
+* matplotlib (2.0.2 or higher)
 * requests
 
 ## About

@@ -1,13 +1,6 @@
 import time
-import warnings
-
-# Hide MatplotlibDeprecationWarning
-warnings.filterwarnings("ignore",".*GUI is implemented.*")
-warnings.filterwarnings("ignore",".*mpl_finance*")
-
 from matplotlib import rcParams as rcparams
 import matplotlib.pyplot as plt
-from matplotlib.finance import candlestick_ohlc as candle
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 
@@ -33,7 +26,7 @@ class CandlestickChart():
 
     def __init__(self, useCBP, coinPair, *args):
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.9.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.9.1)", facecolor=Colors.background)
         numIndicators = len(args)
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
@@ -58,8 +51,10 @@ class CandlestickChart():
         self.axes[0].add_line(self.cursor)
         self.axes[1].add_line(self.cursor1)
         self.fig.canvas.mpl_connect("motion_notify_event", self._mouseMove)
+        self.fig.canvas.mpl_connect("figure_enter_event", self._mouseEnter)
         self.fig.canvas.mpl_connect("axes_enter_event", self._mouseEnter)
         self.fig.canvas.mpl_connect("axes_leave_event", self._mouseLeave)
+        self.fig.canvas.mpl_connect("figure_leave_event", self._mouseLeave)
         self.cursorText0 = self.axes[0].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorText1 = self.axes[1].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorOn = False
@@ -106,7 +101,8 @@ class CandlestickChart():
         self.redraw = True                  # figure should be redrawn efficiently (reload background_0, resave background_1)
         self.fullRedraw = False             # figure and all objects should be completely redrawn
         self.resaveBG = False               # canvas backgrounds need to be resaved (e.g. figure resized)
-
+        self.active = False
+        
         # indicators
         self.indicators = []
         for i,arg in enumerate(args):
@@ -199,6 +195,7 @@ class CandlestickChart():
     def _mouseEnter(self, event):
         self.cursorOn = True
         self.pan = False
+        self.active = True
 
     def _mouseLeave(self, event):
         self.cursorOn = False
@@ -208,9 +205,11 @@ class CandlestickChart():
         self.cursor1.set_xdata([-1, -1])
 
         self.pan = False
+        self.active = False
     
     def _mouseMove(self, event):
-        if not self.loaded: return          
+        if not self.loaded: return
+        if event.xdata == None: return
         if self.pan:
             dx = self._pixelsToPoints(event.x - self.lastMouseX)
             if abs(dx) < 1: return
@@ -269,7 +268,10 @@ class CandlestickChart():
                 self.fibs[1].append(temp2)
 
     def _initCandlesticks(self):
-        self.candlesticks = candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
+        self.candlesticks = [[],[]] #candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
+        for i in range(len(self.ohlc)):
+            self.createCandlestick(i=i)
+            self.drawCandlesticks(i=i)
 
     def _initBBands(self):
         self.bbandsPlt[0], = self.axes[0].plot(range(self.currInt+1), self.bbands[0][1:], color=Colors.blue, linewidth=0.6)
@@ -625,28 +627,32 @@ class CandlestickChart():
         self.timestamps[self.currInt] = data[0][0][0]
             #self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
 
-    def createCandlestick(self):
+    def createCandlestick(self, i=None):
         # create new candlestick and add it to the axis
-        self.candlesticks[0].append(mlines.Line2D([self.currInt, self.currInt], [0, 0], linewidth=0.5))
+        if i == None:
+            i = self.currInt
+        self.candlesticks[0].append(mlines.Line2D([i, i], [0, 0], linewidth=0.5))
         self.axes[0].add_line(self.candlesticks[0][-1])
-        self.candlesticks[1].append(mpatches.Rectangle((self.currInt - 0.25, 0), width=0.5, height=0))
+        self.candlesticks[1].append(mpatches.Rectangle((i - 0.25, 0), width=0.5, height=0))
         self.axes[0].add_patch(self.candlesticks[1][-1])
         
-    def drawCandlesticks(self):
+    def drawCandlesticks(self, i=None):
+        if i == None:
+            i = -1
         try:
-            self.candlesticks[0][-1].set_ydata([self.ohlc[-1][2], self.ohlc[-1][3]])
+            self.candlesticks[0][i].set_ydata([self.ohlc[i][2], self.ohlc[i][3]])
             # open > close
-            if self.ohlc[-1][1] > self.ohlc[-1][4]:
-                self.candlesticks[1][-1].set_y(self.ohlc[-1][4])
-                self.candlesticks[1][-1].set_height(self.ohlc[-1][1] - self.ohlc[-1][4])
-                self.candlesticks[1][-1].set_color(Colors.red)
-                self.candlesticks[0][-1].set_color(Colors.red)
+            if self.ohlc[i][1] > self.ohlc[i][4]:
+                self.candlesticks[1][i].set_y(self.ohlc[i][4])
+                self.candlesticks[1][i].set_height(self.ohlc[i][1] - self.ohlc[i][4])
+                self.candlesticks[1][i].set_color(Colors.red)
+                self.candlesticks[0][i].set_color(Colors.red)
             # open <= close
             else:
-                self.candlesticks[1][-1].set_y(self.ohlc[-1][1])
-                self.candlesticks[1][-1].set_height(self.ohlc[-1][4] - self.ohlc[-1][1])
-                self.candlesticks[1][-1].set_color(Colors.green)
-                self.candlesticks[0][-1].set_color(Colors.green)              
+                self.candlesticks[1][i].set_y(self.ohlc[i][1])
+                self.candlesticks[1][i].set_height(self.ohlc[i][4] - self.ohlc[i][1])
+                self.candlesticks[1][i].set_color(Colors.green)
+                self.candlesticks[0][i].set_color(Colors.green)
         except Exception as e:
             print("Could not draw candlesticks:", e)
             
