@@ -1,6 +1,7 @@
 import time
 from matplotlib import rcParams as rcparams
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 
@@ -25,69 +26,70 @@ class Colors():
 class CandlestickChart():
 
     def __init__(self, useCBP, coinPair, *args):
-        rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.9.1)", facecolor=Colors.background)
+        
         numIndicators = len(args)
+        rcparams["toolbar"] = "None"
+        self.fig = plt.figure("Live BTC Tracker (v0.10.0)", facecolor=Colors.background)
+        self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
+            
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
         self.axes.append(plt.subplot2grid((5+numIndicators,1),(3,0), rowspan=2, sharex=self.axes[0]))
-        # add subplot axes for indicators (1 rowspan per indicator)
-        for i in range(len(args)):
+        for i in range(len(args)): # add subplot axes for indicators (1 rowspan per indicator)
             self.axes.append(plt.subplot2grid((5+numIndicators,1),(5+i,0), sharex=self.axes[0]))
-
-        # configure figure size/layout and connect event handlers
-        self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
         plt.subplots_adjust(top=0.99, bottom=0.05, wspace=0, hspace=0.05)
+
+        # Connect event handlers
         self.fig.canvas.mpl_connect("resize_event", self._handleResize)
         self.fig.canvas.mpl_connect("close_event", self._handleClose)
         self.fig.canvas.mpl_connect("scroll_event", self._handleScroll)
         self.fig.canvas.mpl_connect("button_press_event", self._mouseClick)
         self.fig.canvas.mpl_connect("button_release_event", self._mouseRelease)
         self.fig.canvas.mpl_connect("key_press_event", self._handleKey)
+        self.fig.canvas.mpl_connect("motion_notify_event", self._mouseMove)
+        self.fig.canvas.mpl_connect("figure_enter_event", self._mouseEnter)
+        self.fig.canvas.mpl_connect("axes_enter_event", self._mouseEnter)
+        self.fig.canvas.mpl_connect("axes_leave_event", self._mouseLeave)
+        self.fig.canvas.mpl_connect("figure_leave_event", self._mouseLeave)
 
         # Cursor
         self.cursor = mlines.Line2D([-1, -1], [0, 100000], linewidth=1, color=Colors.cursor)
         self.cursor1 = mlines.Line2D([-1, -1], [0, 100000], linewidth=1, color=Colors.cursor)
         self.axes[0].add_line(self.cursor)
         self.axes[1].add_line(self.cursor1)
-        self.fig.canvas.mpl_connect("motion_notify_event", self._mouseMove)
-        self.fig.canvas.mpl_connect("figure_enter_event", self._mouseEnter)
-        self.fig.canvas.mpl_connect("axes_enter_event", self._mouseEnter)
-        self.fig.canvas.mpl_connect("axes_leave_event", self._mouseLeave)
-        self.fig.canvas.mpl_connect("figure_leave_event", self._mouseLeave)
         self.cursorText0 = self.axes[0].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorText1 = self.axes[1].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorOn = False
         
         # volume vars
-        self.volBars = []
-        self.vol = []
-        self.volRatio = []
-        self.volRatioText = None
-        self.buyEma = []
-        self.sellEma = []
-        self.volEmaPd = 10
-        self.volEmaWt = 2 / (self.volEmaPd+1)
-        self.buyEmaPlt = None
-        self.sellEmaPlt = None
-        self.showVolBreakdown = False
-        self.legendLabels = []
-        self.legend = None
+        self.volBars = []                   # stores the rectangle patches for the volume bar graph
+        self.vol = []                       # stores the value of the cumulative volume per period by exchange
+        self.volRatio = []                  # stores the ratio of buys/total for each period
+        self.volRatioText = None            # text object that displays the buy volume ratio of the current viewing window
+        self.buyEma = []                    # values for the EMA of buy volume
+        self.sellEma = []                   # values for the EMA of sell volume
+        self.volEmaPd = 10                  # period for the volume EMAs
+        self.volEmaWt = 2/(self.volEmaPd+1) # weight for the volume EMAs  
+        self.buyEmaPlt = None               # actual plot object for the buy volume EMA
+        self.sellEmaPlt = None              # actual plot object for the sell volume EMA
+        self.showVolBreakdown = False       # Volume bars showing the breakdown by exchange
+        self.legendLabels = []              # list of strings for the legend
+        self.legend = None                  # legend object
 
         # price vars
-        self.candlesticks = ([],[])
-        self.ohlc = []
-        self.hiLine = None
-        self.hiText = None
-        self.loLine = None
-        self.loText = None
-        self.title = None
-        self.fibs = [[],[]]
-        self.fibOn = True
-        self.bbandsPlt = [None, None, None]
-        self.bbands = [[],[],[]]
-        self.last20 = []
-        self.bbandOn = True
+        self.candlesticks = ([],[])         # tuple of lists of lines and rectangle patches forming candlesticks
+        self.ohlc = []                      # data for each period of price data: [index, open, high, low, close]
+        self.hiLine = None                  # line object marking the highest price in the viewing window
+        self.hiText = None                  # text to go with the highest price marker
+        self.loLine = None                  # line object marking the lowest price in the viewing window
+        self.loText = None                  # text to go with the lowest price marker
+        self.title = None                   # text object showing live ticker price and time left in candle
+        self.fibs = [[],[]]                 # tupe of lists of fib retrace level lines and text
+        self.fibOn = True                   # display fib levels
+        self.bbandsPlt = [None, None, None] # list of line objects that create the BBands
+        self.bbands = [[],[],[]]            # list of lists of data that creates the three lines for the BBands
+        self.last20 = []                    # keep track of last 20 closing prices for BBands
+        self.bbandOn = True                 # display bbands
 
         # misc vars
         self.timestamps = []                # store epoch timestamps of every interval
@@ -101,7 +103,7 @@ class CandlestickChart():
         self.redraw = True                  # figure should be redrawn efficiently (reload background_0, resave background_1)
         self.fullRedraw = False             # figure and all objects should be completely redrawn
         self.resaveBG = False               # canvas backgrounds need to be resaved (e.g. figure resized)
-        self.active = False
+        self.active = False                 # figure is "active" (mouse is on figure)
         
         # indicators
         self.indicators = []
@@ -185,9 +187,15 @@ class CandlestickChart():
                 self.bbandOn = True
                 self.drawBBands(update=True)
 
+
     def _mouseClick(self, event):
         self.pan = True
         self.lastMouseX = event.x
+
+        axIdx = self.axes.index(event.inaxes) # get which axis was clicked
+        # check if [X] was clicked and remove the indicator
+        if axIdx >= 2 and self.indicators[axIdx-2].X_Clicked:
+            self._removeIndicator(axIdx-2)
 
     def _mouseRelease(self, event):
         self.pan = False
@@ -226,6 +234,12 @@ class CandlestickChart():
             self.cursor1.set_xdata([cx, cx])
             self.cursor1.set_ydata([0, max(self.vol[0])*1.1])
             self._updateCursorText(x)
+
+        # get which axis was clicked and set the appropriate indicator to active
+        axIdx = self.axes.index(event.inaxes)
+        for i in range(len(self.indicators)):
+            self.indicators[i].active = (axIdx == i+2)
+                
 
 
     # ----- Private Functions ----- #
@@ -358,6 +372,33 @@ class CandlestickChart():
             
         self.buyEma[0] /= self.volEmaPd
         self.sellEma[0] /= self.volEmaPd
+
+    def _removeIndicator(self, idx):
+        if idx < 0: return
+        
+        # delete the axis and remove from axes and indicator lists
+        self.fig.delaxes(self.axes[2+idx])
+        self.axes = self.axes[:2+idx] + self.axes[2+idx+1:]
+        self.indicators = self.indicators[:idx] + self.indicators[idx+1:]
+        self.backgrounds = self.backgrounds[:2+idx] + self.backgrounds[2+idx+1:]
+
+        # create new gridspec with 3 rows for price, 2 for volume, and 1 for each indicator            
+        gs = gridspec.GridSpec(5+len(self.indicators), 1)
+
+        # Set the new position and subplotspec for price and volume
+        self.axes[0].set_position(gs[0:3].get_position(self.fig))
+        self.axes[0].set_subplotspec(gs[0:3])
+        self.axes[1].set_position(gs[3:5].get_position(self.fig))
+        self.axes[1].set_subplotspec(gs[3:5])
+
+        # set new positino and subplotspec for each indicator
+        for i in range(2, len(self.axes)):
+            self.axes[i].set_position(gs[3+i].get_position(self.fig))
+            self.axes[i].set_subplotspec(gs[3+i])
+
+        # Make sure spacing is correct and resize the figure
+        plt.subplots_adjust(top=0.99, bottom=0.05, wspace=0, hspace=0.05)
+        self.fig.set_size_inches(8, 5+(1.5*len(self.indicators)))  # 1.5-inch per indicator
 
     def _adjustXlims(self, dx0, dx1):
         # get hi/lo prices before panning
@@ -602,6 +643,7 @@ class CandlestickChart():
         self.bbands[0].append(self.bbands[0][-1])
         self.bbands[1].append(self.bbands[1][-1])
         self.bbands[2].append(self.bbands[2][-1])
+        self.last20 = self.last20[1:] + [0]
         self.createCandlestick()
 
         # make sure bbands are updated and drawn
@@ -878,7 +920,7 @@ class CandlestickChart():
         for ax in self.axes:
             ax.set_xlim(self.xlims)
 
-        # reset fibs
+        # reset fibs so text is alligned correctly
         self.updateFibLevels()
         
     def efficientDraw(self):

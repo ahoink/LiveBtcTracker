@@ -13,6 +13,7 @@ def retrieveData():
     global numEx
     global candleData
     global useCBP
+    global rdy
 
     failures = [0]*numEx
     if run: print("success")
@@ -41,11 +42,13 @@ def retrieveData():
             if temp == None or (exchanges[i] != "coinbasepro" and temp[0][0] < (time.time() - granularity) and (time.time() % granularity) > 10):
                 failures[i] += 1
                 if failures[i] == 3:
-                    print("Stopping requests to %s (Restart to try again)" % exchanges[i])
+                    ts_fail = time.strftime("%m/%d %H:%M:%S", time.localtime(ti))
+                    print("%s - Stopping requests to %s (Restart to try again)" % (ts_fail, exchanges[i]))
                 temp = [0]*6
             else:
                 failures[i] = 0
                 if exchanges[i] == "coinbasepro":
+                    candleData[i][0][1] = temp[0][1]
                     candleData[i][0][2] = max(candleData[i][0][2], float(cbpPrice["price"]))
                     candleData[i][0][3] = min(candleData[i][0][3], float(cbpPrice["price"]))
                     candleData[i][0][4] = float(cbpPrice["price"])
@@ -60,6 +63,7 @@ def retrieveData():
             numEx = len(exchanges)
             useCBP = ("coinbasepro" in exchanges)
 
+        rdy = True
         tf = time.time()
         time.sleep(max(0.01, 1-(tf-ti)))
     print("ended")
@@ -230,6 +234,7 @@ def main():
     global exchanges
     global numEx
     global HISTORY
+    global rdy
 
     # ---------- PREPARE TRACKER ---------- #
     # Create chart object that controls all matplotlib related functionality
@@ -260,6 +265,12 @@ def main():
     # Loop to constantly update the current time interval candle and volume bar
     while True:
 
+        if isIdle and not rdy and not chart.active:
+            time.sleep(0.01)
+            continue
+        else:
+            rdy = False
+
         # check for new interval
         t1 = checkTimeInterval(t)
         if t != t1:
@@ -275,7 +286,10 @@ def main():
 
         # set chart title as "<Current Price> <Time interval> <Time left in candle>"
         timeLeft = secondsToString(t+granularity-time.time())
-        chart.setTitle("$%.2f (%s - %s)" % (price, INTERVAL, timeLeft))
+        if not isIdle or chart.active:
+            chart.setTitle("$%.2f (%s - %s)" % (price, INTERVAL, timeLeft))
+        else:
+            chart.setTitle("$%.2f (%s - %s) [IDLE]" % (price, INTERVAL, timeLeft))
 
         # update all charts with the newest data
         chart.update(candleData)
@@ -299,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument("-V", "--vol_breakdown", help="Use if volume bars should be broken down by exchange", action="store_true")
     parser.add_argument("-y", "--history", help="How many time intervals of history to load at start", required=False, type=int, default=100)
     parser.add_argument("-s", "--symbol", help="The ticker symbol of the coin you want to watch (defaults to BTC)", required=False, default="BTC")
-    #parser.add_argument("--idle", help="Update the chart much less often", action="store_true")
+    parser.add_argument("--idle", help="Update the chart much less often", action="store_true")
     args = vars(parser.parse_args())
 
 
@@ -308,7 +322,7 @@ if __name__ == "__main__":
     INTERVAL = args["interval"]             # Time interval to watch
     HISTORY = args["history"]               # amount of history to load at start
     SYMBOL = args["symbol"].upper()         # the ticker symbol of the asset being tracked
-    #isIdle = args["idle"]
+    isIdle = args["idle"]
     
     exchanges = ["binance", "okex", "bitfinex", "gemini", "coinbasepro"] # Binance must be first, CBP must be last
     numEx = len(exchanges)
@@ -391,6 +405,8 @@ if __name__ == "__main__":
     lastBfx = 0             # finex has a lower rate limit, keep track of last call
     candleData = []         # TOHLCV candlestick data for each exchange
     cbpPrice = {"price":0}  # keep track of real-time CBP price - candlestick API doesn't update as often
+    rdy = False
+    
     main()
 
     print("Done.")

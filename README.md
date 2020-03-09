@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.9.1)
+Live Bitcoin chart averaging data from multiple exchanges (v0.10.0)
 
 It's still in Beta for now, but it works
 

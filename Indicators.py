@@ -5,10 +5,16 @@ from abc import ABC, abstractmethod
 class Indicator(ABC):
 # abstract Indicator class
 # outlines functions required by indicator classes
-    @abstractmethod
-    def __init__(self, ax):
-        # Set any attributes needed for the indicator
-        pass
+
+    def __init__(self, ax, xlims):
+        # All indicators have these attributes initialized
+        # Make sure the indicator class calls super()
+        self.ax = ax
+        self.xlims = xlims
+        self.active = False
+        self.removeX = ax.text(0,0, "[X]", fontsize=9, color="#9e9e9e")
+        
+        self.ax.set_facecolor("#1e1e1e")
 
     @abstractmethod
     def initPlot(self, i):
@@ -44,10 +50,16 @@ class Indicator(ABC):
         # else:
         #   draw artists that DO get redrawn every frame
         pass
+
+    # --- Inherit these, don't override --- #
+    def X_Clicked(self, event):
+        return self.removeX.contains(event)[0]
     
 class MACD(Indicator):
 
     def __init__(self, ax, xlims, ema1=26, ema2=12, ema3=9):
+        super(MACD, self).__init__(ax, xlims)
+        
         self.macdBars = []
         self.macd = []
         self.ema1 = 0
@@ -59,29 +71,21 @@ class MACD(Indicator):
         self.ema1Wt = 2 / (self.ema1pd+1)
         self.ema2Wt = 2 / (self.ema2pd+1)
         self.ema3Wt = 2 / (self.ema3pd+1)
-
         self.deriv = []
         self.derivLine = None
-
-        self.ax = ax
-        self.ax.set_facecolor("#1e1e1e")
-        self.ax.set_ylabel("MACD (%d, %d, %d)" % (self.ema2pd, self.ema1pd, self.ema3pd),
-                           fontsize=9)
-        self.xlims = xlims
-                           
+        self.deriv_dx = 2
         self.green = "#22d615"
-        self.red = "#ea2222"                
+        self.red = "#ea2222"
 
+        self.ax.set_ylabel("MACD (%d, %d, %d)" % (self.ema2pd, self.ema1pd, self.ema3pd), fontsize=9)      
+    
     def initPlot(self, i):
-        self.macdBars = self.ax.bar(range(i-len(self.macd)+1, i+1), self.macd).patches
+        self.macdBars = self.ax.bar(range(i+1), self.macd).patches
         for bar,v in zip(self.macdBars, self.macd):
             bar.set_height(v)
-            if v < 0:
-                bar.set_color(self.red)
-            else:
-                bar.set_color(self.green)
-        self.derivLine, = self.ax.plot(range(i-len(self.deriv)+1, i+1), self.deriv, "-", c="white", linewidth=0.7)
-            
+            if v < 0: bar.set_color(self.red)
+            else: bar.set_color(self.green)
+        self.derivLine, = self.ax.plot(range(self.deriv_dx, i+1), self.deriv, "-", c="white", linewidth=0.7)           
 
     def calcEMAfromHistory(self, data, histCnt):
         numEx = len(data)
@@ -131,15 +135,15 @@ class MACD(Indicator):
             self.ema2 = ohlc[i][4] * self.ema2Wt + self.ema2 * (1-self.ema2Wt)
             self.ema3 = (self.ema2-self.ema1) * self.ema3Wt + self.ema3 * (1-self.ema3Wt)
             self.macd.append((self.ema2-self.ema1) - self.ema3)
-            if i >= 2:
-                self.deriv.append((self.macd[i] - self.macd[i-2]) / 2)
+            if i >= self.deriv_dx:
+                self.deriv.append((self.macd[i] - self.macd[i-self.deriv_dx]) / self.deriv_dx)
 
     def update(self, ohlc, vol, currInt, retain=True):
         tempEMA1 = ohlc[currInt][4] * self.ema1Wt + self.ema1 * (1 - self.ema1Wt)
         tempEMA2 = ohlc[currInt][4] * self.ema2Wt + self.ema2 * (1 - self.ema2Wt)
         tempEMA3 = (tempEMA2 - tempEMA1) * self.ema3Wt + self.ema3 * (1 - self.ema3Wt)
         self.macd[currInt] = (tempEMA2 - tempEMA1) - tempEMA3
-        self.deriv[-1] = (self.macd[-1] - self.macd[-3]) / 2
+        self.deriv[-1] = (self.macd[-1] - self.macd[-3]) / self.deriv_dx
 
         if not retain:
             self.ema1 = tempEMA1
@@ -160,6 +164,7 @@ class MACD(Indicator):
                 self.macdBars[currInt].set_color(self.red)
             else:
                 self.macdBars[currInt].set_color(self.green)
+            self.derivLine.set_data(range(self.deriv_dx,currInt+1), self.deriv)
 
             # find min and max values being plotted to set the bounds of the y-axis
             maxMacd = max(self.macd[max(0, self.xlims[0]):self.xlims[1]])
@@ -171,7 +176,10 @@ class MACD(Indicator):
             buf = (maxMacd - minMacd) * 0.12
             self.ax.set_ylim(min(0, minMacd - buf), max(0, maxMacd+buf))
 
-            self.derivLine.set_data(range(2,currInt+1), self.deriv)
+            if self.active: self.removeX.set_text("[X]")
+            else: self.removeX.set_text("")
+            self.removeX.set_position(((self.xlims[1] - self.xlims[0])*0.97 + self.xlims[0], min(0, minMacd-buf/2)))
+
         except Exception as e:
             print("Could not draw MACD:", e)
 
@@ -180,14 +188,17 @@ class MACD(Indicator):
             idx0 = max(0, self.xlims[0])
             idx1 = min(self.xlims[1]+1, len(self.macdBars)-1)
             for i in range(idx0, idx1):
-                self.ax.draw_artist(self.macdBars[i])
+                self.ax.draw_artist(self.macdBars[i])        
         else:
             self.ax.draw_artist(self.macdBars[(min(self.xlims[1]+1, len(self.macdBars)-1))])
             self.ax.draw_artist(self.derivLine)
+            self.ax.draw_artist(self.removeX)
 
 class RSI(Indicator):
 
     def __init__(self, ax, xlims):
+        super(RSI, self).__init__(ax, xlims)
+        
         self.avgGain = 0
         self.avgLoss = 0
         self.rsi = []
@@ -198,11 +209,8 @@ class RSI(Indicator):
         self.rsiText = None
         self.over_fill = []
         
-        self.ax = ax
-        self.ax.set_facecolor("#1e1e1e")
         self.ax.set_ylabel("RSI (14)", fontsize=8)
         self.ax.set_ylim(0, 100)
-
 
     def initPlot(self, i):
         self.rsiPlot, = self.ax.plot(range(i+1), self.rsi, "-", c="yellow", linewidth=0.9) 
@@ -217,9 +225,7 @@ class RSI(Indicator):
         oversold = [y1 < y2 for y1,y2 in zip(self.rsi, ylo)]
         self.over_fill.append(self.ax.fill_between(range(i+1), self.rsi, yhi, where=overbought, facecolor="red", interpolate=True))
         self.over_fill.append(self.ax.fill_between(range(i+1), self.rsi, ylo, where=oversold, facecolor="blue", interpolate=True))
-        #print(self.over_fill[0])
-
-        
+      
     def loadHistory(self, ohlc, data, vol, histCnt):
         #                        100
         # RSI = 100  -   --------------------
@@ -293,6 +299,10 @@ class RSI(Indicator):
         self.rsiText.set_text("%.2f" % self.rsi[-1])
         self.rsiText.set_position(((self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0], 88))
 
+        if self.active: self.removeX.set_text("[X]")
+        else: self.removeX.set_text("")
+        self.removeX.set_position(((self.xlims[1] - self.xlims[0])*0.97 + self.xlims[0], 5))
+
         # fill areas that are overbought or oversold
         if self.rsi[currInt] < 30: 
             ylo = [30]*len(self.rsi)
@@ -314,15 +324,15 @@ class RSI(Indicator):
         else:
             self.ax.draw_artist(self.rsiPlot)
             self.ax.draw_artist(self.rsiText)
+            self.ax.draw_artist(self.removeX)
 
 class OBV(Indicator):
     def __init__(self, ax, xlims):
+        super(OBV, self).__init__(ax, xlims)
+        
         self.obv = []
         self.obvPlt = None
-        self.xlims = xlims
 
-        self.ax = ax
-        self.ax.set_facecolor("#1e1e1e")
         self.ax.set_ylabel("OBV", fontsize=8)
         self.ax.set_yticklabels([])
         
@@ -360,12 +370,20 @@ class OBV(Indicator):
 
     def draw(self, currInt):
         self.obvPlt.set_data(range(currInt+1), self.obv)
-        self.ax.set_ylim(
-            min(self.obv[max(0, self.xlims[0]):min(len(self.obv), self.xlims[1])]),
-            max(self.obv[max(0, self.xlims[0]):min(len(self.obv), self.xlims[1])]))
+        
+        minOBV = min(self.obv[max(0, self.xlims[0]):min(len(self.obv), self.xlims[1])])
+        maxOBV = max(self.obv[max(0, self.xlims[0]):min(len(self.obv), self.xlims[1])])
+        buf = (maxOBV - minOBV) * 0.1
+        self.ax.set_ylim(minOBV-buf, maxOBV+buf)
+        
+        if self.active: self.removeX.set_text("[X]")
+        else: self.removeX.set_text("")
+        self.removeX.set_position(((self.xlims[1] - self.xlims[0])*0.97 + self.xlims[0], minOBV-buf/2))
+        
 
     def drawArtists(self, redraw):
         if redraw:
             pass
         else:
             self.ax.draw_artist(self.obvPlt)
+            self.ax.draw_artist(self.removeX)
