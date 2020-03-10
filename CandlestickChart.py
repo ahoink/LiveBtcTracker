@@ -6,6 +6,7 @@ import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 
 from Indicators import *
+from Configuration import SettingsDialog as confDiag
 
 class Colors():
 
@@ -29,7 +30,7 @@ class CandlestickChart():
         
         numIndicators = len(args)
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.10.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.11.0)", facecolor=Colors.background)
         self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
             
         # Initialize subplots for price and volume charts
@@ -92,6 +93,7 @@ class CandlestickChart():
         self.bbandOn = True                 # display bbands
 
         # misc vars
+        self.oldData = None
         self.timestamps = []                # store epoch timestamps of every interval
         self.currInt = 0                    # index of the current interval
         self.loaded = False                 # whether or not history was loaded and drawn
@@ -104,6 +106,7 @@ class CandlestickChart():
         self.fullRedraw = False             # figure and all objects should be completely redrawn
         self.resaveBG = False               # canvas backgrounds need to be resaved (e.g. figure resized)
         self.active = False                 # figure is "active" (mouse is on figure)
+        self.settings = None                # settings dialog
         
         # indicators
         self.indicators = []
@@ -186,16 +189,19 @@ class CandlestickChart():
             else:
                 self.bbandOn = True
                 self.drawBBands(update=True)
-
+        elif event.key == "s":
+            self.settings = confDiag()
+            self.settings.loadIndicators(self.indicators)
 
     def _mouseClick(self, event):
         self.pan = True
         self.lastMouseX = event.x
 
-        axIdx = self.axes.index(event.inaxes) # get which axis was clicked
-        # check if [X] was clicked and remove the indicator
-        if axIdx >= 2 and self.indicators[axIdx-2].X_Clicked:
-            self._removeIndicator(axIdx-2)
+        if event.inaxes != None and self.settings == None:
+            axIdx = self.axes.index(event.inaxes) # get which axis was clicked
+            # check if [X] was clicked and remove the indicator
+            if axIdx >= 2 and self.indicators[axIdx-2].X_Clicked:
+                self._removeIndicator(axIdx-2)
 
     def _mouseRelease(self, event):
         self.pan = False
@@ -375,16 +381,42 @@ class CandlestickChart():
 
     def _removeIndicator(self, idx):
         if idx < 0: return
-        
+
         # delete the axis and remove from axes and indicator lists
         self.fig.delaxes(self.axes[2+idx])
         self.axes = self.axes[:2+idx] + self.axes[2+idx+1:]
         self.indicators = self.indicators[:idx] + self.indicators[idx+1:]
         self.backgrounds = self.backgrounds[:2+idx] + self.backgrounds[2+idx+1:]
 
-        # create new gridspec with 3 rows for price, 2 for volume, and 1 for each indicator            
-        gs = gridspec.GridSpec(5+len(self.indicators), 1)
+        self._resetAxesPos(len(self.indicators))
 
+    def _addIndicator(self, name):
+        name = name.lower()
+        numIndicators = len(self.indicators) + 1
+
+        self._resetAxesPos(numIndicators)    
+
+        self.axes.append(plt.subplot2grid((5+numIndicators, 1), (4+numIndicators, 0), sharex=self.axes[0]))
+        if name == "macd":
+            self.indicators.append(MACD(self.axes[1+numIndicators], self.xlims))
+        elif name == "rsi":
+            self.indicators.append(RSI(self.axes[1+numIndicators], self.xlims))
+        elif name == "obv":
+            self.indicators.append(OBV(self.axes[1+numIndicators], self.xlims))
+        self.backgrounds.append([None, None])
+
+        self.axes[-1].set_xticklabels([])
+        self.axes[-1].set_xlim(self.xlims)
+        self.axes[-1].spines["bottom"].set_color(Colors.axis)
+        self.axes[-1].spines["top"].set_color(Colors.axis)
+        self.axes[-1].spines["left"].set_color(Colors.axis)
+        self.axes[-1].spines["right"].set_color(Colors.axis)
+        self.axes[-1].tick_params(axis='y', colors=Colors.axis_labels)
+        self.axes[-1].yaxis.label.set_color(Colors.axis_labels)
+
+    def _resetAxesPos(self, n):
+        gs = gridspec.GridSpec(5+n, 1)
+        
         # Set the new position and subplotspec for price and volume
         self.axes[0].set_position(gs[0:3].get_position(self.fig))
         self.axes[0].set_subplotspec(gs[0:3])
@@ -396,9 +428,10 @@ class CandlestickChart():
             self.axes[i].set_position(gs[3+i].get_position(self.fig))
             self.axes[i].set_subplotspec(gs[3+i])
 
-        # Make sure spacing is correct and resize the figure
         plt.subplots_adjust(top=0.99, bottom=0.05, wspace=0, hspace=0.05)
-        self.fig.set_size_inches(8, 5+(1.5*len(self.indicators)))  # 1.5-inch per indicator
+        #self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
+        self.resaveBG = True
+        self.fullRedraw = True     
 
     def _adjustXlims(self, dx0, dx1):
         # get hi/lo prices before panning
@@ -601,6 +634,7 @@ class CandlestickChart():
         self.updateFibLevels()
 
         # Load history for indicators
+        self.oldData = (data, histCnt)
         if False and self.useCBP: # TODO: REMOVE FALSE
             for ind in self.indicators:
                 ind.loadHistory(self.ohlc, data[:-1], self.vol[0], histCnt)
@@ -610,7 +644,7 @@ class CandlestickChart():
 
         # plot indicator data
         for ind in self.indicators:
-                ind.initPlot(self.currInt)
+            ind.initPlot(self.currInt)
 
         # draw everything to start
         self.refresh(fullRedraw=True)
@@ -1004,6 +1038,15 @@ class CandlestickChart():
             self.fig.canvas.blit(self.axes[2+i].bbox)
             
     def update(self, data):
+        # check if settings dialog was recently closed
+        if self.settings != None and not self.settings.isActive():
+            # add and initialize any new indicators
+            for ind in self.settings.addedInd:
+                self._addIndicator(ind)
+                self.indicators[-1].loadHistory(self.ohlc, self.oldData[0], self.vol[0], self.oldData[1])
+                self.indicators[-1].initPlot(self.currInt)
+            self.settings = None # dispose of settings object
+            
         self.updateCurrentVol(data)
         self.drawVolBars()
 
