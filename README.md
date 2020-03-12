@@ -1,5 +1,5 @@
 # LiveBtcTracker
-Live Bitcoin chart averaging data from multiple exchanges (v0.11)
+Live Bitcoin chart averaging data from multiple exchanges (v0.12)
 
 It's still in Beta for now, but it works
 
@@ -32,7 +32,7 @@ Volume information is the sum of all exchanges. Buy volume percentages are based
 * MACD
 * RSI
 * OBV
-* Fibonacci Levels (Toggle with the 'R' key)
+* Fibonacci Retracement (Toggle with the 'R' key)
 * Bollinger Bands (Toggle with the 'B' key)
 
 ## Example
@@ -43,9 +43,10 @@ I plan to update this as it fits my wants and needs. If you have different ideas
 
 I plan do eventually add the following (no specific order)
 * Various additional indicators, price bands, etc.
-* Ability to add/remove/configure indicators at runtime
+* Ability to configure indicators at runtime
 * Ability to change time interval at runtime
 * More accurate time intervals (timezones messes this up right now)
+* Make GUI display consistently between platforms (Windows, Linux, MacOS)
 * pip install (application will no longer be considered beta phase at this point, v0.x -> v1.x)
 
 Also, it turns out matplotlib isn't great for real-time plotting. At some point I may decided to switch to a different library.

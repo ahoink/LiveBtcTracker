@@ -165,7 +165,12 @@ def liveTicker(ex, COIN="BTC"):
     return resp.json()
 
 def validInterval(ex, interval):
+    intervals = getIntervals(ex)
+    return interval in intervals
+
+def getIntervals(ex=None):
     intervals = []
+    if ex == None: ex = "binance"
     
     if ex == "binance":
         intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "6h", "12h", "1d", "1w"]
@@ -182,10 +187,7 @@ def validInterval(ex, interval):
     elif ex == "okex":
         intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "12h", "1d"]
         # 6h and 1w are valid
-    else:
-        return False
-
-    return interval in intervals
+    return intervals
 
 def isValidSymbol(ex, symbol):
     url = ""

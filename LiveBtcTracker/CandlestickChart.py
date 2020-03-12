@@ -1,4 +1,5 @@
 import time
+import gc
 from matplotlib import rcParams as rcparams
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -26,17 +27,17 @@ class Colors():
 
 class CandlestickChart():
 
-    def __init__(self, useCBP, coinPair, *args):
+    def __init__(self, coinPair, conf):
         
-        numIndicators = len(args)
+        numIndicators = len(conf["indicators"])
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.11.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.12.0)", facecolor=Colors.background)
         self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
             
         # Initialize subplots for price and volume charts
         self.axes = [plt.subplot2grid((5+numIndicators,1),(0,0), rowspan=3)]
         self.axes.append(plt.subplot2grid((5+numIndicators,1),(3,0), rowspan=2, sharex=self.axes[0]))
-        for i in range(len(args)): # add subplot axes for indicators (1 rowspan per indicator)
+        for i in range(numIndicators): # add subplot axes for indicators (1 rowspan per indicator)
             self.axes.append(plt.subplot2grid((5+numIndicators,1),(5+i,0), sharex=self.axes[0]))
         plt.subplots_adjust(top=0.99, bottom=0.05, wspace=0, hspace=0.05)
 
@@ -73,8 +74,8 @@ class CandlestickChart():
         self.volEmaWt = 2/(self.volEmaPd+1) # weight for the volume EMAs  
         self.buyEmaPlt = None               # actual plot object for the buy volume EMA
         self.sellEmaPlt = None              # actual plot object for the sell volume EMA
-        self.showVolBreakdown = False       # Volume bars showing the breakdown by exchange
-        self.legendLabels = []              # list of strings for the legend
+        self.showVolBreakdown = conf["showVolBreakdown"]       # Volume bars showing the breakdown by exchange
+        self.legendLabels = conf["legend"]  # list of strings for the legend
         self.legend = None                  # legend object
 
         # price vars
@@ -86,46 +87,46 @@ class CandlestickChart():
         self.loText = None                  # text to go with the lowest price marker
         self.title = None                   # text object showing live ticker price and time left in candle
         self.fibs = [[],[]]                 # tupe of lists of fib retrace level lines and text
-        self.fibOn = True                   # display fib levels
+        self.fibOn = conf["showFib"]        # display fib levels
         self.bbandsPlt = [None, None, None] # list of line objects that create the BBands
         self.bbands = [[],[],[]]            # list of lists of data that creates the three lines for the BBands
         self.last20 = []                    # keep track of last 20 closing prices for BBands
-        self.bbandOn = True                 # display bbands
+        self.bbandOn = conf["showBBands"]   # display bbands
 
         # misc vars
-        self.oldData = None
-        self.timestamps = []                # store epoch timestamps of every interval
-        self.currInt = 0                    # index of the current interval
-        self.loaded = False                 # whether or not history was loaded and drawn
-        self.useCBP = useCBP                # coinbasePro is being used
-        self.xlims = [100 - 16, 100 + 16]   # bounds of the x-axis
-        self.pan = False                    # figure is in panning mode
-        self.lastMouseX = 0                 # last record x-position of the mouse
-        self.backgrounds = None             # canvas image for each axis to draw more efficently [blank canvas, canvas with non-changing objects drawn]
-        self.redraw = True                  # figure should be redrawn efficiently (reload background_0, resave background_1)
-        self.fullRedraw = False             # figure and all objects should be completely redrawn
-        self.resaveBG = False               # canvas backgrounds need to be resaved (e.g. figure resized)
         self.active = False                 # figure is "active" (mouse is on figure)
+        self.backgrounds = None             # canvas image for each axis to draw more efficently [blank canvas, canvas with non-changing objects drawn]
+        self.currInt = 0                    # index of the current interval
+        self.kill = False
+        self.enableIdle = conf["enableIdle"]# idling is enabled (updated less often)
+        self.fullRedraw = False             # figure and all objects should be completely redrawn
+        self.lastMouseX = 0                 # last record x-position of the mouse
+        self.loaded = False                 # whether or not history was loaded and drawn
+        self.oldData = None                 # original data loaded onto chart
+        self.pan = False                    # figure is in panning mode
+        self.redraw = True                  # figure should be redrawn efficiently (reload background_0, resave background_1)       
+        self.resaveBG = False               # canvas backgrounds need to be resaved (e.g. figure resized)
         self.settings = None                # settings dialog
+        self.timeframe = conf["timeFrame"]  # string of timeframe (e.g. "1h")
+        self.timestamps = []                # store epoch timestamps of every interval
+        self.xlims = [100 - 16, 100 + 16]   # bounds of the x-axis
+               
         
         # indicators
         self.indicators = []
-        for i,arg in enumerate(args):
-            lowArg = arg.lower()
-            if lowArg == "macd":
+        for i,ind in enumerate(conf["indicators"]):
+            ind = ind.lower()
+            if ind == "macd":
                 self.indicators.append(MACD(self.axes[2+i], self.xlims))
-            elif lowArg == "rsi":
+            elif ind == "rsi":
                 self.indicators.append(RSI(self.axes[2+i], self.xlims))
-            elif lowArg == "obv":
+            elif ind == "obv":
                 self.indicators.append(OBV(self.axes[2+i], self.xlims))
             else:
-                print("WARNING: No indicator named '%s'" % arg)
+                print("WARNING: No indicator named '%s'" % ind)
 
         # Initialize title
-        self.title = self.axes[0].text(95, 0.01,
-                                   "Loading History...",
-                                   fontsize=12,
-                                   color=Colors.text)
+        self.title = self.axes[0].text(95, 0.01, "Loading History...", fontsize=12, color=Colors.text)
 
         # volume default attributes
         self.axes[1].set_ylabel("Volume (%s)" % coinPair)
@@ -147,14 +148,17 @@ class CandlestickChart():
             ax.tick_params(axis='y', colors=Colors.axis_labels)
             ax.yaxis.label.set_color(Colors.axis_labels)
 
+        # volume breakdown by exchange
+        self.setVolBreakdown(self.showVolBreakdown)
+
     # ----- Event Handlers ----- #
     def _handleClose(self, event):
-        pass
+        self.kill = True
 
     def _handleResize(self, event):
         if self.loaded:
             self.resaveBG = True
-            self.fullRedraw=True
+            self.fullRedraw = True
 
     def _handleScroll(self, event):
         dx = int(event.step)
@@ -175,23 +179,32 @@ class CandlestickChart():
     def _handleKey(self, event):
         if event.key == "r":
             if self.fibOn:
-                for txt in self.fibs[1]:
-                    txt.set_text("")
+                for lvl,txt in zip(self.fibs[0], self.fibs[1]):
+                    lvl.set_visible(False)
+                    txt.set_visible(False)
                 self.fibOn = False
             else:
+                for lvl,txt in zip(self.fibs[0], self.fibs[1]):
+                    lvl.set_visible(True)
+                    txt.set_visible(True)
                 self.fibOn = True
-                self.updateFibLevels()
-                
+                self.updateFibLevels()  
             self.fullRedraw = True
         elif event.key == "b":
             if self.bbandOn:
                 self.bbandOn = False
+                for bb in self.bbandsPlt:
+                    bb.set_visible(False)
             else:
                 self.bbandOn = True
+                for bb in self.bbandsPlt:
+                    bb.set_visible(True)
                 self.drawBBands(update=True)
         elif event.key == "s":
-            self.settings = confDiag()
-            self.settings.loadIndicators(self.indicators)
+            if self.settings == None:
+                self.settings = confDiag()
+                self.settings.loadIndicators(self.indicators)
+                self.settings.setConfig(self.timeframe, self.enableIdle, self.showVolBreakdown, self.fibOn, self.bbandOn)
 
     def _mouseClick(self, event):
         self.pan = True
@@ -280,12 +293,11 @@ class CandlestickChart():
         self.axes[0].set_ylim(minLo - buf, maxHi + buf)
 
         # initialize fib levels
-        if self.fibOn:
-            for i in range(6):
-                temp, = self.axes[0].plot([0,0], [0,0], linestyle="--", color=Colors.fib_levels, linewidth=0.4)
-                temp2 = self.axes[0].text(self.xlims[1]+xpos,0,"",fontsize=9,color=Colors.fib_levels)
-                self.fibs[0].append(temp)
-                self.fibs[1].append(temp2)
+        for i in range(6):
+            temp, = self.axes[0].plot([0,0], [0,0], linestyle="--", color=Colors.fib_levels, linewidth=0.4)
+            temp2 = self.axes[0].text(self.xlims[1]+xpos,0,"",fontsize=9,color=Colors.fib_levels)
+            self.fibs[0].append(temp)
+            self.fibs[1].append(temp2)
 
     def _initCandlesticks(self):
         self.candlesticks = [[],[]] #candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
@@ -506,9 +518,25 @@ class CandlestickChart():
     # ----- MPL Figure attribute functions ----- #
     def setVolBreakdown(self, show):
         if show:
-            self.setVolumeLegend(self.legendLabels)
+            for bar,r in zip(self.volBars[0], self.volRatio):
+                bar.set_color(Colors.blue)
+                if r > 0.5: bar.set_edgecolor(Colors.green)
+                elif r < 0.5: bar.set_edgecolor(Colors.red)
+            for i in range(1,len(self.vol)):
+                self.volBars.append(self.axes[1].bar(
+                    range(self.currInt-len(self.vol[i])+1,self.currInt+1),
+                    self.vol[i],
+                    linewidth=0.7).patches)
         elif self.showVolBreakdown:
-            self.axes[1].get_legend().remove()
+            for bar,r in zip(self.volBars[0], self.volRatio):
+                if r > 0.5: bar.set_color(Colors.green)
+                elif r < 0.5: bar.set_color(Colors.red)
+                else: bar.set_color(Colors.blue)
+            for i in range(1,len(self.vol)):
+                for bar in self.volBars[i]:
+                    bar.remove()
+            self.volBars = self.volBars[:1]
+            
         self.showVolBreakdown = show
 
     def setVolumeLegend(self, labels):
@@ -521,9 +549,12 @@ class CandlestickChart():
                                               loc="lower right")
             for text in self.legend.get_texts():
                 text.set_color(Colors.text)
+        else:
+            if self.legend != None: self.axes[1].get_legend().remove()
 
     def setTitle(self, title):
         try:
+            if self.enableIdle and not self.active: title += " [IDLE]"
             self.title.set_text(title)
             ypos = self.axes[0].get_ylim()[0]
             ypos = ypos + (self.getLowestPrice() - ypos) * 0.2
@@ -544,8 +575,7 @@ class CandlestickChart():
         self.sellEma = [0]
 
         # calc volume EMAs from history
-        if False and self.useCBP: self._calcEMAfromHist(data[:-1], histCnt) # TODO: REMOVE FALSE
-        else: self._calcEMAfromHist(data, histCnt)
+        self._calcEMAfromHist(data, histCnt)
 
         exDown = [[] for i in range(numEx)]
         data = self._checkTimestamps(data, histCnt)
@@ -588,14 +618,8 @@ class CandlestickChart():
             # append ohlc candle data (but ignore coinbase which may not be up-to-date)
             self.ohlc.append([i] + [0]*4)
             for j in range(1,5):
-                if False and self.useCBP: # TODO: REMOVE FALSE
-                    self.ohlc[i][j] =\
-                    sum([float(x[idx][j]) for x in data[:-1] if x not in invalid]) /\
-                    (len([x for x in data[:-1] if x not in invalid]))
-                else:
-                    self.ohlc[i][j] =\
-                    sum([float(x[idx][j]) for x in data if x not in invalid]) /\
-                    (len(data)-len(invalid))
+                self.ohlc[i][j] =\
+                    sum([float(x[idx][j]) for x in data if x not in invalid]) / (len(data)-len(invalid))
 
             # BBands
             self.last20 = self.last20[1:] + [self.ohlc[i][4]]
@@ -635,12 +659,8 @@ class CandlestickChart():
 
         # Load history for indicators
         self.oldData = (data, histCnt)
-        if False and self.useCBP: # TODO: REMOVE FALSE
-            for ind in self.indicators:
-                ind.loadHistory(self.ohlc, data[:-1], self.vol[0], histCnt)
-        else:
-            for ind in self.indicators:
-                ind.loadHistory(self.ohlc, data, self.vol[0], histCnt)
+        for ind in self.indicators:
+            ind.loadHistory(self.ohlc, data, self.vol[0], histCnt)
 
         # plot indicator data
         for ind in self.indicators:
@@ -697,9 +717,7 @@ class CandlestickChart():
     # --- Candle/Price related functions --- #
     def updateCandlesticks(self, data):
         for i in range(1,5):
-            # TODO: REMOVE FALSE
-            if False and self.useCBP: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data[:-1]]) / (len(data)-1)
-            else: self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
+            self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
         self.timestamps[self.currInt] = data[0][0][0]
             #self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
 
@@ -1036,7 +1054,45 @@ class CandlestickChart():
                 self.fig.canvas.restore_region(self.backgrounds[2+i][1])
                 ind.drawArtists(self.redraw)
             self.fig.canvas.blit(self.axes[2+i].bbox)
+
+    def updateSettings(self, params):
+        # update other parameters
+        self.timeframe = params["timeFrame"]
+        self.enableIdle = params["enableIdle"] == '1'
+        tempVolBreakdown = params["showVolBreakdown"] == '1'
+        tempfibOn = params["showFib"] == '1'
+        tempbbandOn = params["showBBands"] == '1'
+
+        if tempVolBreakdown != self.showVolBreakdown:
+            self.setVolBreakdown(tempVolBreakdown)
+            self.setVolumeLegend(self.legendLabels)
             
+        # Update fib levels as needed
+        if tempfibOn and not self.fibOn:
+            for lvl,txt in zip(self.fibs[0], self.fibs[1]):
+                lvl.set_visible(True)
+                txt.set_visible(True)
+            self.fibOn = True
+            self.updateFibLevels()
+        elif not tempfibOn and self.fibOn:
+            for lvl,txt in zip(self.fibs[0], self.fibs[1]):
+                lvl.set_visible(False)
+                txt.set_visible(False)
+            self.fibOn = False
+
+        # Update bbands as needed
+        if tempbbandOn and not self.bbandOn:
+            for bb in self.bbandsPlt:
+                bb.set_visible(True)
+            self.bband = True
+            self.drawBBands(update=True)
+        elif not tempbbandOn and self.bbandOn:
+            for bb in self.bbandsPlt:
+                bb.set_visible(False)
+            self.bbandOn = False
+                  
+        self.fullRedraw = True
+        
     def update(self, data):
         # check if settings dialog was recently closed
         if self.settings != None and not self.settings.isActive():
@@ -1045,7 +1101,17 @@ class CandlestickChart():
                 self._addIndicator(ind)
                 self.indicators[-1].loadHistory(self.ohlc, self.oldData[0], self.vol[0], self.oldData[1])
                 self.indicators[-1].initPlot(self.currInt)
+            # remove indicators
+            for ind in self.settings.removedInd:
+                tempInd = [type(ind).__name__ for ind in self.indicators]
+                self._removeIndicator(tempInd.index(ind))
+
+            self.updateSettings(self.settings.params)
             self.settings = None # dispose of settings object
+            gc.collect()    # force garbage collection to prevent "wrong thread disposal"
+            
+        elif self.settings != None and self.settings.isActive():
+            self.settings.update()
             
         self.updateCurrentVol(data)
         self.drawVolBars()
@@ -1078,6 +1144,7 @@ class CandlestickChart():
     
     def refresh(self, fullRedraw=False):
         t0 = time.time()
+        if self.kill: raise Exception("Figure closed")
 
         # resave the background (figure was resized)
         if self.resaveBG:

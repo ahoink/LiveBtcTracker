@@ -1,6 +1,7 @@
 import time
 import threading
 import argparse
+import os
 from datetime import datetime, timedelta
 
 from CandlestickChart import CandlestickChart
@@ -50,8 +51,8 @@ def retrieveData():
                 if exchanges[i] == "coinbasepro":
                     candleData[i][0][1] = temp[0][1]
                     candleData[i][0][2] = max(candleData[i][0][2], float(cbpPrice["price"]))
-                    candleData[i][0][3] = min(candleData[i][0][3], float(cbpPrice["price"]))
-                    candleData[i][0][4] = float(cbpPrice["price"])
+                    if cbpPrice["price"] != 0: candleData[i][0][3] = min(candleData[i][0][3], float(cbpPrice["price"]))
+                    if cbpPrice["price"] != 0: candleData[i][0][4] = float(cbpPrice["price"])
                 else:
                     candleData[i] = temp
                              
@@ -227,6 +228,39 @@ def loadInitData(chart, HISTORY, t):
             if wasDown:
                 print("\t%s (%d)" % (ex, len(wasDown)))
 
+def getDefaultConfig():
+    conf = {}
+    conflines = []
+
+    # check if config directory and default config exist, otherwise create them
+    if not os.path.isdir("..\\Configs"):
+        os.mkdir("..\\Configs")
+    if not os.path.isfile("..\\Configs\\default.conf"):
+        writeout = "Indicators=MACD,RSI\n"
+        writeout += "timeFrame=1h\n"
+        writeout += "enableIdle=0\n"
+        writeout += "showVolBreakdown=0\n"
+        writeout += "showFib=0\n"
+        writeout += "showBBands=0"
+        with open("..\\Configs\\default.conf", 'w') as f:
+            f.write(writeout)
+            
+    # read default config file
+    with open("..\\Configs\\default.conf", 'r') as f:
+        conflines = f.readlines()
+    conflines = [x.replace("\n", "") for x in conflines]
+
+    conf["indicators"] = conflines[0].split('=')[1].split(',')
+    # load other settings
+    for line in conflines[1:]:
+        splitted = line.split('=')
+        if len(splitted[1]) > 1:
+            conf[splitted[0]] = splitted[1]
+        else:
+            conf[splitted[0]] = splitted[1] == "1"
+
+    return conf
+
 def main():
     global run
     global lastBfx
@@ -238,8 +272,7 @@ def main():
 
     # ---------- PREPARE TRACKER ---------- #
     # Create chart object that controls all matplotlib related functionality
-    chart = CandlestickChart(useCBP, SYMBOL, "MACD", "RSI", "OBV")
-    chart.setVolBreakdown(VOL_BREAK_DOWN)
+    chart = CandlestickChart(SYMBOL, CONF)
     chart.show()
 
     # Most recent interval start time
@@ -253,9 +286,6 @@ def main():
     # Get some history and current candle to start
     loadInitData(chart, HISTORY, t)
 
-    # For some reason, can only show legend AFTER plotting something
-    chart.setVolumeLegend(legend)
-
     # Start separate thread for API calls (they're slow)
     print("Starting data retrieval thread...", end='')
     thrd = threading.Thread(target=retrieveData, args=())
@@ -265,7 +295,7 @@ def main():
     # Loop to constantly update the current time interval candle and volume bar
     while True:
 
-        if isIdle and not rdy and not chart.active:
+        if chart.enableIdle and not rdy and not chart.active:
             time.sleep(0.01)
             continue
         else:
@@ -279,17 +309,13 @@ def main():
 
         # Adjust for CBP as needed
         if useCBP: adjustCBPdata(candleData, chart, t)
-        elif chart.useCBP: chart.useCBP = False
 
         # average price from all exchanges (should weight by volume?)
         price = sum([float(x[0][4]) for x in candleData]) / numEx
 
         # set chart title as "<Current Price> <Time interval> <Time left in candle>"
         timeLeft = secondsToString(t+granularity-time.time())
-        if not isIdle or chart.active:
-            chart.setTitle("$%.2f (%s - %s)" % (price, INTERVAL, timeLeft))
-        else:
-            chart.setTitle("$%.2f (%s - %s) [IDLE]" % (price, INTERVAL, timeLeft))
+        chart.setTitle("$%.2f (%s - %s)" % (price, INTERVAL, timeLeft))
 
         # update all charts with the newest data
         chart.update(candleData)
@@ -309,7 +335,7 @@ if __name__ == "__main__":
     # ---------- Parse CL Args ---------- #
     print("Initializing...\n")
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--interval", help="Time interval to track (exchange APIs only allow specific intervals)", required=False, default="1h")
+    parser.add_argument("-i", "--interval", help="Time interval to track (exchange APIs only allow specific intervals)", required=False, default="NONE")
     parser.add_argument("-V", "--vol_breakdown", help="Use if volume bars should be broken down by exchange", action="store_true")
     parser.add_argument("-y", "--history", help="How many time intervals of history to load at start", required=False, type=int, default=100)
     parser.add_argument("-s", "--symbol", help="The ticker symbol of the coin you want to watch (defaults to BTC)", required=False, default="BTC")
@@ -322,13 +348,28 @@ if __name__ == "__main__":
     INTERVAL = args["interval"]             # Time interval to watch
     HISTORY = args["history"]               # amount of history to load at start
     SYMBOL = args["symbol"].upper()         # the ticker symbol of the asset being tracked
-    isIdle = args["idle"]
+    IS_IDLE = args["idle"]                  # chart only updates when get new data for all exchanges OR user is active on the GUI
+
+    # Load default parameters
+    CONF = getDefaultConfig()
+    if INTERVAL == "NONE":
+        INTERVAL = CONF["timeFrame"]
+    else:
+        CONF["timeFrame"] = INTERVAL
+    if not VOL_BREAK_DOWN:
+        VOL_BREAK_DOWN = CONF["showVolBreakdown"]
+    else:
+        CONF["showVolBreakdown"] = True
+    if not IS_IDLE:
+        IS_IDLE = CONF["enableIdle"]
+    else:
+        CONF["enableIdle"] = True
     
     exchanges = ["binance", "okex", "bitfinex", "gemini", "coinbasepro"] # Binance must be first, CBP must be last
     numEx = len(exchanges)
     granularity = api.granFromInterv(INTERVAL)
-    legend = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]
-
+    CONF["legend"] = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]   
+    
     # --- arg checks --- #
     if (HISTORY > 1405):
         print("WARNING: Cannot retrieve more than 1405 intervals of history")
@@ -336,27 +377,28 @@ if __name__ == "__main__":
 
     if not api.validInterval("binance", INTERVAL):
         print("WARNING: %s is not a valid interval" % INTERVAL)
-        print("\tDefaulting to 1h")
-        INTERVAL="1h"
-        granularity = 3600
+        print("\tDefaulting to %s" % CONF["timeFrame"])
+        INTERVAL = CONF["timeFrame"]
+        granularity = api.granFromInterv(INTERVAL)
+        
     tempEx = exchanges[:]
     for ex in tempEx:
         if not api.validInterval(ex, INTERVAL):
             print("WARNING: %s is not a valid interval for the exchange %s" % (INTERVAL, ex))
             print("\tThis exchange will not be included in tracking")
-            del legend[exchanges.index(ex)]
+            del CONF["legend"][exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -= 1
         elif ex == "bitfinex" and INTERVAL == "1w":
             print("INFO: 1w is a valid interval for bitfinex but will not be included in tracking")
-            del legend[exchanges.index(ex)]
+            del CONF["legend"][exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -=1
 
         elif not api.isValidSymbol(ex, SYMBOL):
             print("WARNING: %s cannot be traded for USD or USDT on %s" % (SYMBOL, ex))
             print("\tThis exchange will not be included in tracking")
-            del legend[exchanges.index(ex)]
+            del CONF["legend"][exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -= 1
             
