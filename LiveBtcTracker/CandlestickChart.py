@@ -25,6 +25,366 @@ class Colors():
     red = "#ea2222"
     blue = "#5087fa"
 
+class PriceChart():
+
+    def __init__(self, ax, xlims):
+        self.ax = ax
+        self.xlims = xlims
+ 
+        self.candlesticks = ([],[])         # tuple of lists of lines and rectangle patches forming candlesticks
+        self.ohlc = []                      # data for each period of price data: [index, open, high, low, close]
+        self.hiLine = None                  # line object marking the highest price in the viewing window
+        self.hiText = None                  # text to go with the highest price marker
+        self.loLine = None                  # line object marking the lowest price in the viewing window
+        self.loText = None                  # text to go with the lowest price marker
+        self.title = None                   # text object showing live ticker price and time left in candle
+        self.fibs = [[],[]]                 # tuple of lists of fib retrace level lines and text
+        self.fibOn = False                  # display fib levels
+        self.bbandsPlt = [None, None, None] # list of line objects that create the BBands
+        self.bbands = [[],[],[]]            # list of lists of data that creates the three lines for the BBands
+        self.last20 = []                    # keep track of last 20 closing prices for BBands
+        self.bbandOn = False                # display bbands
+        self.lvlTextPos = 0
+        self.loaded = False
+
+        self.ax.set_ylabel("Price (USD)")
+        self.ax.yaxis.grid(which="major", linestyle="--", color=Colors.grid_lines)
+        self.ax.set_facecolor(Colors.background)
+
+    def _calcBBfromHist(self, data, histCnt):
+        numEx = len(data)
+        smaBBandStart = histCnt + 20
+        sumPd = 0
+        sqSum = 0
+        
+        # First EMA value is a SMA
+        # calculate SMA for first X intervals of emaX
+        for i in range(20):
+            idx = smaBBandStart-1-i
+            temp = sum([float(x[idx][4]) for x in data if x[idx][4] != 0]) / len([float(x[idx][4]) for x in data if x[idx][4] != 0])
+            self.last20.append(temp)
+            sumPd += temp
+            sqSum += temp * temp
+
+        mean = sumPd / 20
+        var = sqSum / 20 - mean * mean
+        stdev = var**0.5
+        self.bbands[0].append(mean+stdev*2)
+        self.bbands[1].append(mean)
+        self.bbands[2].append(mean-stdev*2)
+
+    def loadHistory(self, idx, data):
+        self.ohlc.append([idx] + [0]*4)
+        for j in range(1,5):
+            self.ohlc[idx][j] = sum([float(x[j]) for x in data]) / len(data)
+
+        # BBands
+        self.last20 = self.last20[1:] + [self.ohlc[idx][4]]
+        newMean = sum(self.last20) / 20
+        sqSum = sum([(x-newMean)**2 for x in self.last20])
+        newStdev = (sqSum / 20)**0.5
+
+        self.bbands[0].append(newMean+newStdev*2)
+        self.bbands[1].append(newMean)
+        self.bbands[2].append(newMean-newStdev*2)
+
+    def _initHiLoLevels(self):           
+        maxHi = self.getHighestPrice()
+        self.hiLine, = self.ax.plot(self.xlims,
+                                  [maxHi, maxHi],
+                                  linestyle="--",
+                                  color=Colors.green,
+                                  linewidth=0.5)
+        self.hiText = self.ax.text(self.xlims[1] + self.lvlTextPos,
+                                   maxHi,
+                                   "%.2f" % maxHi,
+                                   fontsize=9,
+                                   color=Colors.green)
+        
+        minLo = self.getLowestPrice()
+        self.loLine, = self.ax.plot(self.xlims,
+                                  [minLo, minLo],
+                                  linestyle="--",
+                                  color=Colors.red,
+                                  linewidth=0.5)
+        self.loText = self.ax.text(self.xlims[1] + self.lvlTextPos,
+                                   minLo,
+                                   "%.2f" % minLo,
+                                   fontsize=9,
+                                   color=Colors.red)
+
+        buf = (maxHi - minLo) * 0.12
+        self.ax.set_ylim(minLo - buf, maxHi + buf)
+
+        # initialize fib levels
+        for i in range(6):
+            temp, = self.ax.plot([0,0], [0,0], linestyle="--", color=Colors.fib_levels, linewidth=0.4)
+            temp2 = self.ax.text(self.xlims[1]+self.lvlTextPos,0,"",fontsize=9,color=Colors.fib_levels)
+            self.fibs[0].append(temp)
+            self.fibs[1].append(temp2)
+
+    def _initCandlesticks(self):
+        self.candlesticks = [[],[]] #candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
+        for i in range(len(self.ohlc)):
+            self.createCandlestick(i=i)
+            self.drawCandlesticks(i=i)
+
+    def _initBBands(self): 
+        self.bbandsPlt[0], = self.ax.plot(range(len(self.bbands[0])-1), self.bbands[0][1:], color=Colors.blue, linewidth=0.6)
+        self.bbandsPlt[1], = self.ax.plot(range(len(self.bbands[1])-1), self.bbands[1][1:], color=Colors.blue, linestyle=(0,(5,10)), linewidth=0.6)
+        self.bbandsPlt[2], = self.ax.plot(range(len(self.bbands[2])-1), self.bbands[2][1:], color=Colors.blue, linewidth=0.6)
+
+    def setTextPos(self, xpos):
+        self.lvlTextPos = xpos
+
+    def initPlot(self, xlims):
+        self.xlims = xlims
+        self._initHiLoLevels()
+        self._initCandlesticks()
+        self._initBBands()
+        self.loaded = True
+        self.updateFibLevels()
+
+    def toggleFib(self, flag=None):
+        if flag != None:
+            if self.fibOn == flag: return
+            self.fibOn = flag
+        else:
+            self.fibOn = not self.fibOn
+
+        if not self.loaded: return
+        for lvl,txt in zip(self.fibs[0], self.fibs[1]):
+            lvl.set_visible(self.fibOn)
+            txt.set_visible(self.fibOn)
+        self.updateFibLevels()
+
+    def toggleBBand(self, flag=None):
+        if flag != None:
+            if self.bbandOn == flag: return
+            self.bbandOn = flag
+        else:
+            self.bbandOn = not self.bbandOn
+            
+        if not self.loaded: return
+        for bb in self.bbandsPlt:
+            if bb != None:
+                bb.set_visible(self.bbandOn)
+        self.drawBBands(update=True)
+
+    def incCurrIntvl(self, idx):
+        # update candlestick chart
+        self.ohlc.append([idx] + [0]*4)
+        self.bbands[0].append(self.bbands[0][-1])
+        self.bbands[1].append(self.bbands[1][-1])
+        self.bbands[2].append(self.bbands[2][-1])
+        self.last20 = self.last20[1:] + [0]
+        self.createCandlestick(idx)
+
+        # make sure bbands are updated and drawn
+        self.updateBBands(update=True)
+        self.drawBBands(update=True)
+
+    def setXlims(self, xlims, updatemarkers=True):
+        self.xlims = xlims
+
+        if not updatemarkers: return
+        # get hi/lo prices after panning
+        hi = self.getHighestPrice()
+        lo = self.getLowestPrice()
+        self.updateHiLevel(hi=hi, lo=lo)
+        self.updateLoLevel(hi=hi, lo=lo)
+        self.updateFibLevels(hi=hi, lo=lo)
+
+        return lo, hi
+
+    def update(self, data, xlims):
+        needFullRedraw = False
+        self.xlims = xlims
+
+        tempHi = self.getHighestPrice()
+        tempLo = self.getLowestPrice()
+        self.updateCandlesticks(data)
+        self.drawCandlesticks()
+        # check if highest or lowest price changed (new data or panning window) and update the markers
+        newHi = self.getHighestPrice()
+        newLo = self.getLowestPrice()
+        if tempHi != newHi:
+            self.updateHiLevel(hi=newHi, lo=newLo)
+            self.updateFibLevels(hi=newHi, lo=newLo)
+            needFullRedraw = True
+        if tempLo != newLo:
+            self.updateLoLevel(hi=newHi, lo=newLo)
+            self.updateFibLevels(hi=newHi, lo=newLo)
+            needFullRedraw = True
+        self.updateBBands()
+        self.drawBBands()
+
+        return needFullRedraw
+
+    def efficientDraw(self, redraw):
+        if redraw:
+            if self.fibOn:
+                for fib in self.fibs[0]:
+                    self.ax.draw_artist(fib)
+            
+            # draw all candlesticks in current viewing window (within xlims)
+            idx0 = max(0, self.xlims[0])
+            idx1 = min(self.xlims[1]+1, len(self.candlesticks[0]))
+            if idx1 == len(self.candlesticks[0]): idx1 -= 1
+            for i in range(idx0, idx1):
+                self.ax.draw_artist(self.candlesticks[0][i])
+                self.ax.draw_artist(self.candlesticks[1][i])
+            self.ax.draw_artist(self.hiLine)
+            self.ax.draw_artist(self.loLine)
+        else:
+            # only redraw the newest (live) candle and the bbands
+            self.ax.draw_artist(self.candlesticks[0][-1])
+            self.ax.draw_artist(self.candlesticks[1][-1])
+
+            if self.bbandOn:
+                for bband in self.bbandsPlt:
+                    self.ax.draw_artist(bband)  
+
+    def updateCandlesticks(self, data):
+        for i in range(1,5):
+            self.ohlc[-1][i] = sum([float(x[0][i]) for x in data]) / len(data)
+
+    def createCandlestick(self, i):
+        # create new candlestick and add it to the axis
+        self.candlesticks[0].append(mlines.Line2D([i, i], [0, 0], linewidth=0.5))
+        self.ax.add_line(self.candlesticks[0][-1])
+        self.candlesticks[1].append(mpatches.Rectangle((i - 0.25, 0), width=0.5, height=0))
+        self.ax.add_patch(self.candlesticks[1][-1])
+        
+    def drawCandlesticks(self, i=None):
+        if i == None:
+            i = -1
+        try:
+            self.candlesticks[0][i].set_ydata([self.ohlc[i][2], self.ohlc[i][3]])
+            # open > close
+            if self.ohlc[i][1] > self.ohlc[i][4]:
+                self.candlesticks[1][i].set_y(self.ohlc[i][4])
+                self.candlesticks[1][i].set_height(self.ohlc[i][1] - self.ohlc[i][4])
+                self.candlesticks[1][i].set_color(Colors.red)
+                self.candlesticks[0][i].set_color(Colors.red)
+            # open <= close
+            else:
+                self.candlesticks[1][i].set_y(self.ohlc[i][1])
+                self.candlesticks[1][i].set_height(self.ohlc[i][4] - self.ohlc[i][1])
+                self.candlesticks[1][i].set_color(Colors.green)
+                self.candlesticks[0][i].set_color(Colors.green)
+        except Exception as e:
+            print("Could not draw candlesticks:", e)
+            
+    def getHighestPrice(self):
+        idx = int(max(0, self.xlims[0]))
+        idx2 = int(min(len(self.ohlc), self.xlims[1]))
+        return max([x[2] for x in self.ohlc[idx:idx2]])
+
+    def getLowestPrice(self):
+        idx = int(max(0, self.xlims[0]))
+        idx2 = int(min(len(self.ohlc), self.xlims[1]))
+        return min([x[3] for x in self.ohlc[idx:idx2]])
+
+    def getCandle(self, idx):
+        if 0 <= idx <= len(self.ohlc):
+            return self.ohlc[idx]
+        else:
+            print("Invalid candle index")
+    
+    def updateHiLevel(self, hi=None, lo=None):
+        if hi == None: hi = self.getHighestPrice()
+        if lo == None: lo = self.getLowestPrice()
+        
+        self.hiLine.set_data([-1, self.xlims[1]], [hi, hi])
+        self.hiText.set_text("%.2f" % hi)
+        self.hiText.set_position((self.xlims[1] + self.lvlTextPos, hi))
+        buf = (hi - lo) * 0.12
+        self.ax.set_ylim(self.ax.get_ylim()[0], hi + buf)
+ 
+    def updateLoLevel(self, hi=None, lo=None):
+        if hi == None: hi = self.getHighestPrice()
+        if lo == None: lo = self.getLowestPrice()
+        if lo == 0: return
+        
+        self.loLine.set_data([-1, self.xlims[1]], [lo, lo])  
+        self.loText.set_text("%.2f" % lo)
+        self.loText.set_position((self.xlims[1] + self.lvlTextPos, lo))
+        buf = (hi - lo) * 0.12
+        self.ax.set_ylim(lo - buf, self.ax.get_ylim()[1])      
+
+    def updateFibLevels(self, hi=None,lo=None):
+        if not self.fibOn: return
+            
+        if hi == None: hi = self.getHighestPrice()
+        if lo == None: lo = self.getLowestPrice()
+        diff = hi - lo
+      
+        xh = [i for i,d in enumerate(self.ohlc) if d[2] == hi]
+        xl = [i for i,d in enumerate(self.ohlc) if d[3] == lo]
+        xh = xh[-1]
+        xl = xl[-1]
+        if xh == xl:
+            for fib,txt in zip(self.fibs[0], self.fibs[1]):
+                fib.set_data([0,0], [0,0])
+                txt.set_text("")
+            return
+
+        m = diff / (xh - xl)        
+        b = hi - m*xh
+
+        if xh > xl:
+            fib23_6 = hi - diff * 0.236
+            fib38_2 = hi - diff * 0.382
+            fib50_0 = hi - diff * 0.5
+            fib61_8 = hi - diff * 0.618
+            fib78_6 = hi - diff * 0.786
+        else:
+            fib23_6 = lo + diff * 0.236
+            fib38_2 = lo + diff * 0.382
+            fib50_0 = lo + diff * 0.5
+            fib61_8 = lo + diff * 0.618
+            fib78_6 = lo + diff * 0.786
+        self.fibs[0][0].set_data([(fib23_6 - b) / m, self.xlims[1]], [fib23_6, fib23_6])
+        self.fibs[0][1].set_data([(fib38_2 - b) / m, self.xlims[1]], [fib38_2, fib38_2])
+        self.fibs[0][2].set_data([(fib50_0 - b) / m, self.xlims[1]], [fib50_0, fib50_0])
+        self.fibs[0][3].set_data([(fib61_8 - b) / m, self.xlims[1]], [fib61_8, fib61_8])
+        self.fibs[0][4].set_data([(fib78_6 - b) / m, self.xlims[1]], [fib78_6, fib78_6])
+        self.fibs[0][5].set_data([(hi - b) / m, (lo - b) / m], [hi, lo])
+
+        self.fibs[1][0].set_text("%.2f" % fib23_6)
+        self.fibs[1][0].set_position((self.xlims[1]+self.lvlTextPos, fib23_6))
+        self.fibs[1][1].set_text("%.2f" % fib38_2)
+        self.fibs[1][1].set_position((self.xlims[1]+self.lvlTextPos, fib38_2))
+        self.fibs[1][2].set_text("%.2f" % fib50_0)
+        self.fibs[1][2].set_position((self.xlims[1]+self.lvlTextPos, fib50_0))
+        self.fibs[1][3].set_text("%.2f" % fib61_8)
+        self.fibs[1][3].set_position((self.xlims[1]+self.lvlTextPos, fib61_8))
+        self.fibs[1][4].set_text("%.2f" % fib78_6)
+        self.fibs[1][4].set_position((self.xlims[1]+self.lvlTextPos, fib78_6))
+
+    def updateBBands(self, update=False):
+
+        # avoid doing a costly calculation unless the new value is more than one stdev away
+        stdev = (self.bbands[0][-1] - self.bbands[1][-1])/2
+        if not update and abs(self.ohlc[-1][4] - self.last20[-1]) < stdev: return
+
+        self.last20[-1] = self.ohlc[-1][4]
+        newMean = sum(self.last20) / 20
+        sqSum = sum([(x-newMean)**2 for x in self.last20])
+        newStdev = (sqSum / 20)**0.5
+
+        self.bbands[0][-1] = (newMean+newStdev*2)
+        self.bbands[1][-1] = (newMean)
+        self.bbands[2][-1] = (newMean-newStdev*2)
+
+    def drawBBands(self, update=False):
+        if not self.bbandOn: return
+        
+        for bbp, bb in zip(self.bbandsPlt, self.bbands):
+            bbp.set_data(range(len(bb)-1), bb[1:])
+    
+        
 class CandlestickChart():
 
     def __init__(self, coinPair, conf):
@@ -78,21 +438,6 @@ class CandlestickChart():
         self.legendLabels = conf["legend"]  # list of strings for the legend
         self.legend = None                  # legend object
 
-        # price vars
-        self.candlesticks = ([],[])         # tuple of lists of lines and rectangle patches forming candlesticks
-        self.ohlc = []                      # data for each period of price data: [index, open, high, low, close]
-        self.hiLine = None                  # line object marking the highest price in the viewing window
-        self.hiText = None                  # text to go with the highest price marker
-        self.loLine = None                  # line object marking the lowest price in the viewing window
-        self.loText = None                  # text to go with the lowest price marker
-        self.title = None                   # text object showing live ticker price and time left in candle
-        self.fibs = [[],[]]                 # tupe of lists of fib retrace level lines and text
-        self.fibOn = conf["showFib"]        # display fib levels
-        self.bbandsPlt = [None, None, None] # list of line objects that create the BBands
-        self.bbands = [[],[],[]]            # list of lists of data that creates the three lines for the BBands
-        self.last20 = []                    # keep track of last 20 closing prices for BBands
-        self.bbandOn = conf["showBBands"]   # display bbands
-
         # misc vars
         self.active = False                 # figure is "active" (mouse is on figure)
         self.backgrounds = None             # canvas image for each axis to draw more efficently [blank canvas, canvas with non-changing objects drawn]
@@ -110,8 +455,12 @@ class CandlestickChart():
         self.timeframe = conf["timeFrame"]  # string of timeframe (e.g. "1h")
         self.timestamps = []                # store epoch timestamps of every interval
         self.xlims = [100 - 16, 100 + 16]   # bounds of the x-axis
-               
-        
+
+        # price chart
+        self.priceChart = PriceChart(self.axes[0], self.xlims)
+        self.priceChart.toggleFib(conf["showFib"])
+        self.priceChart.toggleBBand(conf["showBBands"])
+                  
         # indicators
         self.indicators = []
         for i,ind in enumerate(conf["indicators"]):
@@ -126,16 +475,11 @@ class CandlestickChart():
                 print("WARNING: No indicator named '%s'" % ind)
 
         # Initialize title
-        self.title = self.axes[0].text(95, 0.01, "Loading History...", fontsize=12, color=Colors.text)
+        self.title = self.axes[0].text(95, 0.01, "", fontsize=12, color=Colors.text)
 
         # volume default attributes
         self.axes[1].set_ylabel("Volume (%s)" % coinPair)
-        self.axes[1].set_facecolor(Colors.background)
-
-        # price default attributes
-        self.axes[0].set_ylabel("Price (USD)")
-        self.axes[0].yaxis.grid(which="major", linestyle="--", color=Colors.grid_lines)
-        self.axes[0].set_facecolor(Colors.background)
+        self.axes[1].set_facecolor(Colors.background)       
 
         # set axis limits (also affects indicators)
         for ax in self.axes:
@@ -159,6 +503,7 @@ class CandlestickChart():
         if self.loaded:
             self.resaveBG = True
             self.fullRedraw = True
+            self.priceChart.setTextPos(self._pixelsToPoints(10))
 
     def _handleScroll(self, event):
         dx = int(event.step)
@@ -178,33 +523,16 @@ class CandlestickChart():
 
     def _handleKey(self, event):
         if event.key == "r":
-            if self.fibOn:
-                for lvl,txt in zip(self.fibs[0], self.fibs[1]):
-                    lvl.set_visible(False)
-                    txt.set_visible(False)
-                self.fibOn = False
-            else:
-                for lvl,txt in zip(self.fibs[0], self.fibs[1]):
-                    lvl.set_visible(True)
-                    txt.set_visible(True)
-                self.fibOn = True
-                self.updateFibLevels()  
+            self.priceChart.toggleFib() 
             self.fullRedraw = True
         elif event.key == "b":
-            if self.bbandOn:
-                self.bbandOn = False
-                for bb in self.bbandsPlt:
-                    bb.set_visible(False)
-            else:
-                self.bbandOn = True
-                for bb in self.bbandsPlt:
-                    bb.set_visible(True)
-                self.drawBBands(update=True)
+            self.priceChart.toggleBBand()
         elif event.key == "s":
             if self.settings == None:
                 self.settings = confDiag()
                 self.settings.loadIndicators(self.indicators)
-                self.settings.setConfig(self.timeframe, self.enableIdle, self.showVolBreakdown, self.fibOn, self.bbandOn)
+                self.settings.setConfig(self.timeframe, self.enableIdle, self.showVolBreakdown,
+                                        self.priceChart.fibOn, self.priceChart.bbandOn)
 
     def _mouseClick(self, event):
         self.pan = True
@@ -261,55 +589,7 @@ class CandlestickChart():
                 
 
 
-    # ----- Private Functions ----- #
-    def _initHiLoLevels(self):     
-        xpos = self._pixelsToPoints(10)
-        
-        maxHi = self.getHighestPrice()
-        self.hiLine, = self.axes[0].plot(self.xlims,
-                                  [maxHi, maxHi],
-                                  linestyle="--",
-                                  color=Colors.green,
-                                  linewidth=0.5)
-        self.hiText = self.axes[0].text(self.xlims[1] + xpos,
-                                   maxHi,
-                                   "%.2f" % maxHi,
-                                   fontsize=9,
-                                   color=Colors.green)
-        
-        minLo = self.getLowestPrice()
-        self.loLine, = self.axes[0].plot(self.xlims,
-                                  [minLo, minLo],
-                                  linestyle="--",
-                                  color=Colors.red,
-                                  linewidth=0.5)
-        self.loText = self.axes[0].text(self.xlims[1] + xpos,
-                                   minLo,
-                                   "%.2f" % minLo,
-                                   fontsize=9,
-                                   color=Colors.red)
-
-        buf = (maxHi - minLo) * 0.12
-        self.axes[0].set_ylim(minLo - buf, maxHi + buf)
-
-        # initialize fib levels
-        for i in range(6):
-            temp, = self.axes[0].plot([0,0], [0,0], linestyle="--", color=Colors.fib_levels, linewidth=0.4)
-            temp2 = self.axes[0].text(self.xlims[1]+xpos,0,"",fontsize=9,color=Colors.fib_levels)
-            self.fibs[0].append(temp)
-            self.fibs[1].append(temp2)
-
-    def _initCandlesticks(self):
-        self.candlesticks = [[],[]] #candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
-        for i in range(len(self.ohlc)):
-            self.createCandlestick(i=i)
-            self.drawCandlesticks(i=i)
-
-    def _initBBands(self):
-        self.bbandsPlt[0], = self.axes[0].plot(range(self.currInt+1), self.bbands[0][1:], color=Colors.blue, linewidth=0.6)
-        self.bbandsPlt[1], = self.axes[0].plot(range(self.currInt+1), self.bbands[1][1:], color=Colors.blue, linestyle=(0,(5,10)), linewidth=0.6)
-        self.bbandsPlt[2], = self.axes[0].plot(range(self.currInt+1), self.bbands[2][1:], color=Colors.blue, linewidth=0.6)
-        
+    # ----- Private Functions ----- #       
     def _initVolBars(self):
         numEx = len(self.vol)
         self.volBars.append(self.axes[1].bar(
@@ -358,35 +638,20 @@ class CandlestickChart():
     def _calcEMAfromHist(self, data, histCnt):
         numEx = len(data)
         emaVolStart = histCnt + self.volEmaPd
-        smaBBandStart = histCnt + 20
         sumPd = 0
         sqSum = 0
         
         # First EMA value is a SMA
         # calculate SMA for first X intervals of emaX
-        for i in range(max(self.volEmaPd, 20)):
-            if i < self.volEmaPd:
-                idx = emaVolStart-1-i
-                totalVol = sum([float(x[idx][5]) for x in data])
-                if len(data[0][idx]) < 10:
-                    self.buyEma[0] += totalVol * 0.5
-                    self.sellEma[0] += totalVol * 0.5
-                else:
-                    self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
-                    self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))
-            idx = smaBBandStart-1-i
-            temp = sum([float(x[idx][4]) for x in data if x[idx][4] != 0]) / len([float(x[idx][4]) for x in data if x[idx][4] != 0])
-            self.last20.append(temp)
-            sumPd += temp
-            sqSum += temp * temp
-
-        mean = sumPd / 20
-        var = sqSum / 20 - mean * mean
-        stdev = var**0.5
-        self.bbands[0].append(mean+stdev*2)
-        self.bbands[1].append(mean)
-        self.bbands[2].append(mean-stdev*2)
-            
+        for i in range(self.volEmaPd):
+            idx = emaVolStart-1-i
+            totalVol = sum([float(x[idx][5]) for x in data])
+            if len(data[0][idx]) < 10:
+                self.buyEma[0] += totalVol * 0.5
+                self.sellEma[0] += totalVol * 0.5
+            else:
+                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
+                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))         
             
         self.buyEma[0] /= self.volEmaPd
         self.sellEma[0] /= self.volEmaPd
@@ -447,20 +712,15 @@ class CandlestickChart():
 
     def _adjustXlims(self, dx0, dx1):
         # get hi/lo prices before panning
-        tempHi = self.getHighestPrice()
-        tempLo = self.getLowestPrice()
+        tempHi = self.priceChart.getHighestPrice()
+        tempLo = self.priceChart.getLowestPrice()
 
         # shift the xlims
         self.xlims = [int(round(self.xlims[0]+dx0)), int(round(self.xlims[1]+dx1))]
         for ax in self.axes:
             ax.set_xlim(self.xlims)
 
-        # get hi/lo prices after panning
-        newHi = self.getHighestPrice()
-        newLo = self.getLowestPrice()
-        self.updateHiLevel(hi=newHi, lo=newLo)
-        self.updateLoLevel(hi=newHi, lo=newLo)
-        self.updateFibLevels(hi=newHi, lo=newLo)
+        newLo, newHi = self.priceChart.setXlims(self.xlims)
 
         # if hi/lo price changed, do a full redraw to redraw axis labels and hi/lo text
         if tempHi != newHi or tempLo != newLo:
@@ -470,11 +730,12 @@ class CandlestickChart():
     def _updateCursorText(self, x):
         if 0 <= x <= self.currInt:
             timeStr = time.strftime("%d %b %Y %H:%M", time.localtime(self.timestamps[x]))
+            tempCandle = self.priceChart.getCandle(x)
             self.cursorText0.set_text(
                 "%s    Open: %.2f, High: %.2f, Low: %.2f, Close: %.2f" %
-                (timeStr, self.ohlc[x][1], self.ohlc[x][2], self.ohlc[x][3], self.ohlc[x][4]))
+                (timeStr, tempCandle[1], tempCandle[2], tempCandle[3], tempCandle[4]))
             self.cursorText0.set_y(
-                self.getHighestPrice() + (self.getHighestPrice() - self.getLowestPrice()) * 0.04)
+                self.priceChart.getHighestPrice() + (self.priceChart.getHighestPrice() - self.priceChart.getLowestPrice()) * 0.04)
             self.cursorText0.set_x(self.xlims[0]+0.25)
             
             self.cursorText1.set_text("Volume: %.8f (%.1f%% Buys)" % (self.vol[0][x], self.volRatio[x]*100))
@@ -557,7 +818,7 @@ class CandlestickChart():
             if self.enableIdle and not self.active: title += " [IDLE]"
             self.title.set_text(title)
             ypos = self.axes[0].get_ylim()[0]
-            ypos = ypos + (self.getLowestPrice() - ypos) * 0.2
+            ypos = ypos + (self.priceChart.getLowestPrice() - ypos) * 0.2
             self.title.set_y(ypos)
             self.title.set_x((self.xlims[0] + self.xlims[1])/2 - (self.xlims[1] - self.xlims[0])/6)
         except:
@@ -576,6 +837,7 @@ class CandlestickChart():
 
         # calc volume EMAs from history
         self._calcEMAfromHist(data, histCnt)
+        self.priceChart._calcBBfromHist(data, histCnt)
 
         exDown = [[] for i in range(numEx)]
         data = self._checkTimestamps(data, histCnt)
@@ -590,7 +852,7 @@ class CandlestickChart():
             invalid = []
             avgT = sum([x[idx][0] for x in data]) / numEx
             for j in range(numEx):
-                if not data[j][idx][-1]:#data[j][idx][0] < avgT:
+                if not data[j][idx][-1]:
                     invalid.append(data[j])
                     exDown[j].append(i)
             # sometimes Binance trading will be down even when the API is active. Check for volume
@@ -614,31 +876,17 @@ class CandlestickChart():
                                self.buyEma[-1] * (1 - self.volEmaWt))
             self.sellEma.append(((1 - self.volRatio[i]) * self.vol[0][i]) * self.volEmaWt +\
                                self.sellEma[-1] * (1 - self.volEmaWt))
-                    
-            # append ohlc candle data (but ignore coinbase which may not be up-to-date)
-            self.ohlc.append([i] + [0]*4)
-            for j in range(1,5):
-                self.ohlc[i][j] =\
-                    sum([float(x[idx][j]) for x in data if x not in invalid]) / (len(data)-len(invalid))
 
-            # BBands
-            self.last20 = self.last20[1:] + [self.ohlc[i][4]]
-            newMean = sum(self.last20) / 20
-            sqSum = sum([(x-newMean)**2 for x in self.last20])
-            newStdev = (sqSum / 20)**0.5
-
-            self.bbands[0].append(newMean+newStdev*2)
-            self.bbands[1].append(newMean)
-            self.bbands[2].append(newMean-newStdev*2)
-
-        # initialize chart objects
-        if len(self.ohlc) != 100:
-            self.xlims = [len(self.ohlc) - 16, len(self.ohlc) + 16]
-            for ax in self.axes:
-                ax.set_xlim(self.xlims)
+            # load an interval of data (one candle) onto price chart
+            tempData = [x[idx] for x in data if x not in invalid]
+            self.priceChart.loadHistory(i, tempData)
+            
 
         # set axis lims
-        self._initHiLoLevels()
+        self.xlims = [histCnt - 16, histCnt + 16]
+        for ax in self.axes:
+            ax.set_xlim(self.xlims)
+        self.priceChart.setXlims(self.xlims, updatemarkers=False)
         maxVol = max(self.vol[0][max(0, self.xlims[0]):self.xlims[1]])
         self.axes[1].set_ylim(0, maxVol*1.06)
             
@@ -650,25 +898,20 @@ class CandlestickChart():
         self.setTitle("Loading Chart Objects...")
         self.fig.canvas.draw()
         
-        # draw candlestick and volume charts
+        # draw price and volume charts
         self.currInt = histCnt - 1
-        self._initCandlesticks()
-        self._initBBands()
-        self._initVolBars()
-        self.updateFibLevels()
+        self.priceChart.setTextPos(self._pixelsToPoints(10))
+        self.priceChart.initPlot(self.xlims)
+        self._initVolBars()        
 
-        # Load history for indicators
+        # Load history for indicators and plot data
         self.oldData = (data, histCnt)
         for ind in self.indicators:
-            ind.loadHistory(self.ohlc, data, self.vol[0], histCnt)
-
-        # plot indicator data
-        for ind in self.indicators:
+            ind.loadHistory(self.priceChart.ohlc, data, self.vol[0], histCnt)
             ind.initPlot(self.currInt)
 
         # draw everything to start
         self.refresh(fullRedraw=True)
-
         self.loaded = True
         return exDown
 
@@ -677,10 +920,10 @@ class CandlestickChart():
     def incCurrIntvl(self):
         # update indicators
         for ind in self.indicators:
-            ind.update(self.ohlc, self.vol[0], self.currInt, retain=False)
+            ind.update(self.priceChart.ohlc, self.vol[0], self.currInt, retain=False)
 
         # make sure bbands are updated
-        self.updateBBands(update=True)
+        self.priceChart.updateBBands(update=True)
 
         # update chart limits
         self.currInt += 1
@@ -688,22 +931,11 @@ class CandlestickChart():
             self.xlims = [self.xlims[0]+1, self.xlims[1]+1]
             for ax in self.axes:
                 ax.set_xlim(self.xlims)
-            self.updateHiLevel()
-            self.updateLoLevel()
+            self.priceChart.updateHiLevel()
+            self.priceChart.updateLoLevel()
 
-        # update candlestick chart
-        self.ohlc.append([self.currInt] + [0]*4)
-        self.timestamps.append([0])
-        self.bbands[0].append(self.bbands[0][-1])
-        self.bbands[1].append(self.bbands[1][-1])
-        self.bbands[2].append(self.bbands[2][-1])
-        self.last20 = self.last20[1:] + [0]
-        self.createCandlestick()
-
-        # make sure bbands are updated and drawn
-        self.updateBBands(update=True)
-        self.drawBBands(update=True)
-
+        self.priceChart.incCurrIntvl(self.currInt)
+        
         # update volume chart
         for v in self.vol:
             v.append(0)
@@ -712,154 +944,9 @@ class CandlestickChart():
         self.buyEma.append(0)
         self.sellEma.append(0)
 
-        self.redraw = True
-
-    # --- Candle/Price related functions --- #
-    def updateCandlesticks(self, data):
-        for i in range(1,5):
-            self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
-        self.timestamps[self.currInt] = data[0][0][0]
-            #self.ohlc[self.currInt][i] = sum([float(x[0][i]) for x in data]) / len(data)
-
-    def createCandlestick(self, i=None):
-        # create new candlestick and add it to the axis
-        if i == None:
-            i = self.currInt
-        self.candlesticks[0].append(mlines.Line2D([i, i], [0, 0], linewidth=0.5))
-        self.axes[0].add_line(self.candlesticks[0][-1])
-        self.candlesticks[1].append(mpatches.Rectangle((i - 0.25, 0), width=0.5, height=0))
-        self.axes[0].add_patch(self.candlesticks[1][-1])
-        
-    def drawCandlesticks(self, i=None):
-        if i == None:
-            i = -1
-        try:
-            self.candlesticks[0][i].set_ydata([self.ohlc[i][2], self.ohlc[i][3]])
-            # open > close
-            if self.ohlc[i][1] > self.ohlc[i][4]:
-                self.candlesticks[1][i].set_y(self.ohlc[i][4])
-                self.candlesticks[1][i].set_height(self.ohlc[i][1] - self.ohlc[i][4])
-                self.candlesticks[1][i].set_color(Colors.red)
-                self.candlesticks[0][i].set_color(Colors.red)
-            # open <= close
-            else:
-                self.candlesticks[1][i].set_y(self.ohlc[i][1])
-                self.candlesticks[1][i].set_height(self.ohlc[i][4] - self.ohlc[i][1])
-                self.candlesticks[1][i].set_color(Colors.green)
-                self.candlesticks[0][i].set_color(Colors.green)
-        except Exception as e:
-            print("Could not draw candlesticks:", e)
-            
-    def getHighestPrice(self):
-        idx = int(max(0, self.xlims[0]))
-        idx2 = int(min(len(self.ohlc), self.xlims[1]))
-        return max([x[2] for x in self.ohlc[idx:idx2]])
-
-    def getLowestPrice(self):
-        idx = int(max(0, self.xlims[0]))
-        idx2 = int(min(len(self.ohlc), self.xlims[1]))
-        return min([x[3] for x in self.ohlc[idx:idx2]])
-    
-    def updateHiLevel(self, hi=None, lo=None):
-        if hi == None: hi = self.getHighestPrice()
-        if lo == None: lo = self.getLowestPrice()
-        
-        xpos = self._pixelsToPoints(10)
-        
-        self.hiLine.set_data([-1, self.xlims[1]], [hi, hi])
-        self.hiText.set_text("%.2f" % hi)
-        self.hiText.set_position((self.xlims[1] + xpos, hi))
-        buf = (hi - lo) * 0.12
-        self.axes[0].set_ylim(self.axes[0].get_ylim()[0], hi + buf)
- 
-    def updateLoLevel(self, hi=None, lo=None):
-        if hi == None: hi = self.getHighestPrice()
-        if lo == None: lo = self.getLowestPrice()
-        if lo == 0: return
-
-        xpos = self._pixelsToPoints(10)
-        
-        self.loLine.set_data([-1, self.xlims[1]], [lo, lo])  
-        self.loText.set_text("%.2f" % lo)
-        self.loText.set_position((self.xlims[1] + xpos, lo))
-        buf = (hi - lo) * 0.12
-        self.axes[0].set_ylim(lo - buf, self.axes[0].get_ylim()[1])
-
-    def updateFibLevels(self, hi=None,lo=None):
-        if not self.fibOn: return
-            
-        if hi == None: hi = self.getHighestPrice()
-        if lo == None: lo = self.getLowestPrice()
-        diff = hi - lo
-
-        xpos = self._pixelsToPoints(10)
-      
-        xh = [i for i,d in enumerate(self.ohlc) if d[2] == hi]
-        xl = [i for i,d in enumerate(self.ohlc) if d[3] == lo]
-        xh = xh[-1]
-        xl = xl[-1]
-        if xh == xl:
-            for fib,txt in zip(self.fibs[0], self.fibs[1]):
-                fib.set_data([0,0], [0,0])
-                txt.set_text("")
-            return
-
-        m = diff / (xh - xl)        
-        b = hi - m*xh
-
-        if xh > xl:
-            fib23_6 = hi - diff * 0.236
-            fib38_2 = hi - diff * 0.382
-            fib50_0 = hi - diff * 0.5
-            fib61_8 = hi - diff * 0.618
-            fib78_6 = hi - diff * 0.786
-        else:
-            fib23_6 = lo + diff * 0.236
-            fib38_2 = lo + diff * 0.382
-            fib50_0 = lo + diff * 0.5
-            fib61_8 = lo + diff * 0.618
-            fib78_6 = lo + diff * 0.786
-        self.fibs[0][0].set_data([(fib23_6 - b) / m, self.xlims[1]], [fib23_6, fib23_6])
-        self.fibs[0][1].set_data([(fib38_2 - b) / m, self.xlims[1]], [fib38_2, fib38_2])
-        self.fibs[0][2].set_data([(fib50_0 - b) / m, self.xlims[1]], [fib50_0, fib50_0])
-        self.fibs[0][3].set_data([(fib61_8 - b) / m, self.xlims[1]], [fib61_8, fib61_8])
-        self.fibs[0][4].set_data([(fib78_6 - b) / m, self.xlims[1]], [fib78_6, fib78_6])
-        self.fibs[0][5].set_data([(hi - b) / m, (lo - b) / m], [hi, lo])
-
-        self.fibs[1][0].set_text("%.2f" % fib23_6)
-        self.fibs[1][0].set_position((self.xlims[1]+xpos, fib23_6))
-        self.fibs[1][1].set_text("%.2f" % fib38_2)
-        self.fibs[1][1].set_position((self.xlims[1]+xpos, fib38_2))
-        self.fibs[1][2].set_text("%.2f" % fib50_0)
-        self.fibs[1][2].set_position((self.xlims[1]+xpos, fib50_0))
-        self.fibs[1][3].set_text("%.2f" % fib61_8)
-        self.fibs[1][3].set_position((self.xlims[1]+xpos, fib61_8))
-        self.fibs[1][4].set_text("%.2f" % fib78_6)
-        self.fibs[1][4].set_position((self.xlims[1]+xpos, fib78_6))
-
-    def updateBBands(self, update=False):
-
-        # avoid doing a costly calculation unless the new value is more than one stdev away
-        stdev = (self.bbands[0][-1] - self.bbands[1][-1])/2
-        if not update and abs(self.ohlc[self.currInt][4] - self.last20[-1]) < stdev: return
-
-        self.last20[-1] = self.ohlc[self.currInt][4]
-        newMean = sum(self.last20) / 20
-        sqSum = sum([(x-newMean)**2 for x in self.last20])
-        newStdev = (sqSum / 20)**0.5
-
-        self.bbands[0][-1] = (newMean+newStdev*2)
-        self.bbands[1][-1] = (newMean)
-        self.bbands[2][-1] = (newMean-newStdev*2)
-
-    def drawBBands(self, update=False):
-        if not self.bbandOn: return
-        
-        #stdev = (self.bbands[0][-1] - self.bbands[1][-1])/2
-        #if not update and abs(self.ohlc[self.currInt][4] - self.last20[-1]) < stdev: return
-        
-        for bbp, bb in zip(self.bbandsPlt, self.bbands):
-            bbp.set_data(range(self.currInt+1), bb[1:])
+        # misc updates
+        self.timestamps.append([0])
+        self.redraw = True   
 
 
     # --- Volume related functions --- #
@@ -939,10 +1026,12 @@ class CandlestickChart():
     def getVol(self, ex, intvl):
         return self.vol[ex][intvl]
 
+
+
     # --- Indicator functions --- #
     def updateIndicators(self, retain=True):
         for ind in self.indicators:
-            ind.update(self.ohlc, self.vol[0], self.currInt, retain)
+            ind.update(self.priceChart.ohlc, self.vol[0], self.currInt, retain)
         
     def drawIndicators(self):
         for ind in self.indicators:
@@ -950,19 +1039,14 @@ class CandlestickChart():
             ind.draw(self.currInt)
 
 
-    
+
     # --- Draw/show figure functions --- #
     def resaveBackground(self):
         # shift axes to hide chart objects
         for ax in self.axes:
             ax.set_xlim([-1,-0.5])
             
-        # redraw the "blank" canvas
-        hi = self.getHighestPrice()
-        lo = self.getLowestPrice()
-        self.updateHiLevel(hi=hi,lo=lo)
-        self.updateLoLevel(hi=hi,lo=lo)
-        self.fig.canvas.draw()
+        self.fig.canvas.draw() # redraw the "blank" canvas
 
         # copy the blank canvas
         for i in range(len(self.axes)):
@@ -972,43 +1056,25 @@ class CandlestickChart():
         for ax in self.axes:
             ax.set_xlim(self.xlims)
 
-        # reset fibs so text is alligned correctly
-        self.updateFibLevels()
+        # reset fibs so text is alligned correctly (TODO: move this somewhere else?)
+        self.priceChart.updateFibLevels()
         
     def efficientDraw(self):
         # Axis 0 (price)
         if self.redraw: # redraw viewing window in event of zooming/panning
-            # restore the blank canvas
-            self.fig.canvas.restore_region(self.backgrounds[0][0])
-            if self.fibOn:
-                for fib in self.fibs[0]:
-                    self.axes[0].draw_artist(fib)
-            # draw all candlesticks in current viewing window (within xlims)
-            idx0 = max(0, self.xlims[0])
-            idx1 = min(self.xlims[1]+1, len(self.candlesticks[0]))
-            for i in range(idx0, idx1):
-                self.axes[0].draw_artist(self.candlesticks[0][i])
-                self.axes[0].draw_artist(self.candlesticks[1][i])
-                if i + 2 == idx1:
-                    # save the canvas that has all candles except most recent (these objects won't change)
-                    self.backgrounds[0][1] = self.fig.canvas.copy_from_bbox(self.axes[0].bbox)
+            self.fig.canvas.restore_region(self.backgrounds[0][0]) # restore the blank canvas
+            self.priceChart.efficientDraw(True)
+            self.backgrounds[0][1] = self.fig.canvas.copy_from_bbox(self.axes[0].bbox) # save canvas with all candles except most recent (these objects won't change)
         else:
-            # restore the canvas with old candles
-            self.fig.canvas.restore_region(self.backgrounds[0][1])
-            idx = min(self.currInt, self.xlims[1]+1)
-            # only redraw the newest (live) candle
-            self.axes[0].draw_artist(self.candlesticks[0][idx])
-            self.axes[0].draw_artist(self.candlesticks[1][idx])
+            self.fig.canvas.restore_region(self.backgrounds[0][1]) # restore the canvas with old candles
+        self.priceChart.efficientDraw(False)
             
         # draw the remaining chart objects (cursor, text, etc.)
         self.axes[0].draw_artist(self.title)
         if self.cursorOn:
             self.axes[0].draw_artist(self.cursor)
             self.axes[0].draw_artist(self.cursorText0)
-        if self.bbandOn:
-            for bband in self.bbandsPlt:
-                self.axes[0].draw_artist(bband)        
-
+               
         # blit the canvas within the axis bounding box to refresh with the redrawn objects
         self.fig.canvas.blit(self.axes[0].bbox)
 
@@ -1067,29 +1133,9 @@ class CandlestickChart():
             self.setVolBreakdown(tempVolBreakdown)
             self.setVolumeLegend(self.legendLabels)
             
-        # Update fib levels as needed
-        if tempfibOn and not self.fibOn:
-            for lvl,txt in zip(self.fibs[0], self.fibs[1]):
-                lvl.set_visible(True)
-                txt.set_visible(True)
-            self.fibOn = True
-            self.updateFibLevels()
-        elif not tempfibOn and self.fibOn:
-            for lvl,txt in zip(self.fibs[0], self.fibs[1]):
-                lvl.set_visible(False)
-                txt.set_visible(False)
-            self.fibOn = False
-
-        # Update bbands as needed
-        if tempbbandOn and not self.bbandOn:
-            for bb in self.bbandsPlt:
-                bb.set_visible(True)
-            self.bband = True
-            self.drawBBands(update=True)
-        elif not tempbbandOn and self.bbandOn:
-            for bb in self.bbandsPlt:
-                bb.set_visible(False)
-            self.bbandOn = False
+        # Update fib levels and bbands as needed
+        self.priceChart.toggleFib(tempfibOn)
+        self.priceChart.toggleBBand(tempbbandOn)
                   
         self.fullRedraw = True
         
@@ -1099,7 +1145,7 @@ class CandlestickChart():
             # add and initialize any new indicators
             for ind in self.settings.addedInd:
                 self._addIndicator(ind)
-                self.indicators[-1].loadHistory(self.ohlc, self.oldData[0], self.vol[0], self.oldData[1])
+                self.indicators[-1].loadHistory(self.priceChart.ohlc, self.oldData[0], self.vol[0], self.oldData[1])
                 self.indicators[-1].initPlot(self.currInt)
             # remove indicators
             for ind in self.settings.removedInd:
@@ -1112,28 +1158,16 @@ class CandlestickChart():
             
         elif self.settings != None and self.settings.isActive():
             self.settings.update()
-            
+
+        # misc updates
+        self.timestamps[-1] = data[0][0][0]
+
+        # update volume chart   
         self.updateCurrentVol(data)
         self.drawVolBars()
 
         # update price chart
-        tempHi = self.getHighestPrice()
-        tempLo = self.getLowestPrice()
-        self.updateCandlesticks(data)
-        self.drawCandlesticks()
-        # check if highest or lowest price changed (new data or panning window) and update the markers
-        newHi = self.getHighestPrice()
-        newLo = self.getLowestPrice()
-        if tempHi != newHi:
-            self.updateHiLevel(hi=newHi, lo=newLo)
-            self.updateFibLevels(hi=newHi, lo=newLo)
-            self.fullRedraw = True
-        if tempLo != newLo:
-            self.updateLoLevel(hi=newHi, lo=newLo)
-            self.updateFibLevels(hi=newHi, lo=newLo)
-            self.fullRedraw = True
-        self.updateBBands()
-        self.drawBBands()
+        self.fullRedraw = self.fullRedraw or self.priceChart.update(data, self.xlims)
 
         # update technical indicators
         self.updateIndicators()
@@ -1164,4 +1198,13 @@ class CandlestickChart():
             
         self.fig.canvas.flush_events()
         t1 = time.time()
+        return
+        if self.resaveBG:
+            print("Resave BG: %.1f" % ((t1-t0)*1000))
+        elif fullRedraw or self.fullRedraw:
+            print("Full Redraw: %.1f" % ((t1-t0)*1000))
+        elif self.redraw:
+            print("Redraw: %.1f" % ((t1-t0)*1000))
+        else:
+            print("Draw: %.1f" % ((t1-t0)*1000))
         #print("%.1f fps" % (1/(t1-t0)))#*1000)
