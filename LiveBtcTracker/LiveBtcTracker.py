@@ -40,7 +40,7 @@ def retrieveData():
             if exchanges[i] == "bitfinex": lastBfx = time.time()
             
             # Check if latest data was retrievable
-            if temp == None or (exchanges[i] != "coinbasepro" and temp[0][0] < (time.time() - granularity) and (time.time() % granularity) > 10):
+            if not isCandleUpdated(exchanges[i], temp):
                 failures[i] += 1
                 if failures[i] == 3:
                     ts_fail = time.strftime("%m/%d %H:%M:%S", time.localtime(ti))
@@ -117,6 +117,16 @@ def checkTimeInterval(t):
             t = t1 - (t1%granularity)
             #chart.incCurrIntvl()
     return t
+
+def isCandleUpdated(ex, data):
+    tnow = time.time()
+    if data == None or\
+        (ex != "coinbasepro" and\
+        data[0][0] < (tnow - granularity) and\
+        (tnow % granularity) > 30):
+        return False
+    else:
+        return True
 
 # ----- These functions are generally only run once ----- #
 def filterDupes(data):
@@ -307,6 +317,10 @@ def main():
             t = t1
             chart.incCurrIntvl()
 
+        if numEx == 0:
+            print("No exchanges are available to communicate with. Quitting...")
+            break
+
         # Adjust for CBP as needed
         if useCBP: adjustCBPdata(candleData, chart, t)
 
@@ -322,7 +336,8 @@ def main():
 
         try:
             chart.refresh()
-        except:
+        except Exception as ex:
+            if str(ex) != "Figure closed": print(ex)
             break
 
     # End data thread and join with main
@@ -389,12 +404,6 @@ if __name__ == "__main__":
             del CONF["legend"][exchanges.index(ex)]
             exchanges.remove(ex)
             numEx -= 1
-        elif ex == "bitfinex" and INTERVAL == "1w":
-            print("INFO: 1w is a valid interval for bitfinex but will not be included in tracking")
-            del CONF["legend"][exchanges.index(ex)]
-            exchanges.remove(ex)
-            numEx -=1
-
         elif not api.isValidSymbol(ex, SYMBOL):
             print("WARNING: %s cannot be traded for USD or USDT on %s" % (SYMBOL, ex))
             print("\tThis exchange will not be included in tracking")
@@ -403,6 +412,9 @@ if __name__ == "__main__":
             numEx -= 1
             
     useCBP = ("coinbasepro" in exchanges)
+    if numEx == 0:
+        print("ERROR: No exchanges are available to communicate with. Quitting...")
+        exit()
 
 
     # ---------- 24hr ---------- #

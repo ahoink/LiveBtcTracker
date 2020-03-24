@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
+import matplotlib.collections as mcoll
 
 from Indicators import *
 from Configuration import SettingsDialog as confDiag
@@ -20,6 +21,7 @@ class Colors():
     fib_levels = "#e5ce46"
     buyEMA = "#3333ff"
     sellEMA = "#ffff00"
+    bband_fill = "#273146"
 
     green = "#22d615"
     red = "#ea2222"
@@ -30,25 +32,26 @@ class PriceChart():
     def __init__(self, ax, xlims):
         self.ax = ax
         self.xlims = xlims
- 
+
+        self.bbands = [[],[],[]]            # list of lists of data that creates the three lines for the BBands
+        self.bbandOn = False                # display bbands
+        self.bbandsPlt = [None, None, None] # list of line objects that create the BBands
+        self.bbandsUpdated = False          # bbands data has been updated
         self.candlesticks = ([],[])         # tuple of lists of lines and rectangle patches forming candlesticks
-        self.ohlc = []                      # data for each period of price data: [index, open, high, low, close]
-        self.hiLine = None                  # line object marking the highest price in the viewing window
-        self.hiText = None                  # text to go with the highest price marker
-        self.loLine = None                  # line object marking the lowest price in the viewing window
-        self.loText = None                  # text to go with the lowest price marker
-        self.title = None                   # text object showing live ticker price and time left in candle
         self.fibs = [[],[]]                 # tuple of lists of fib retrace level lines and text
         self.fibOn = False                  # display fib levels
-        self.bbandsPlt = [None, None, None] # list of line objects that create the BBands
-        self.bbands = [[],[],[]]            # list of lists of data that creates the three lines for the BBands
+        self.grid = None                    # grid lines collection
+        self.hiLine = None                  # line object marking the highest price in the viewing window
+        self.hiText = None                  # text to go with the highest price marker
         self.last20 = []                    # keep track of last 20 closing prices for BBands
-        self.bbandOn = False                # display bbands
-        self.lvlTextPos = 0
-        self.loaded = False
+        self.loaded = False                 # price chart has been loaded and initialized
+        self.loLine = None                  # line object marking the lowest price in the viewing window
+        self.loText = None                  # text to go with the lowest price marker
+        self.lvlTextPos = 0                 # x-position of the text for the price level markers
+        self.ohlc = []                      # data for each period of price data: [index, open, high, low, close]
+        self.title = None                   # text object showing live ticker price and time left in candle
 
         self.ax.set_ylabel("Price (USD)")
-        self.ax.yaxis.grid(which="major", linestyle="--", color=Colors.grid_lines)
         self.ax.set_facecolor(Colors.background)
 
     def _calcBBfromHist(self, data, histCnt):
@@ -123,6 +126,12 @@ class PriceChart():
             self.fibs[0].append(temp)
             self.fibs[1].append(temp2)
 
+    def _initGrid(self):
+        yticks = self.ax.get_yticks()
+        lines = ([[(x, y) for x in self.xlims] for y in yticks])
+        self.grid = mcoll.LineCollection(lines, linestyles="--", linewidth=0.7, color=Colors.grid_lines)
+        self.ax.add_collection(self.grid)
+
     def _initCandlesticks(self):
         self.candlesticks = [[],[]] #candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
         for i in range(len(self.ohlc)):
@@ -133,6 +142,7 @@ class PriceChart():
         self.bbandsPlt[0], = self.ax.plot(range(len(self.bbands[0])-1), self.bbands[0][1:], color=Colors.blue, linewidth=0.6)
         self.bbandsPlt[1], = self.ax.plot(range(len(self.bbands[1])-1), self.bbands[1][1:], color=Colors.blue, linestyle=(0,(5,10)), linewidth=0.6)
         self.bbandsPlt[2], = self.ax.plot(range(len(self.bbands[2])-1), self.bbands[2][1:], color=Colors.blue, linewidth=0.6)
+        self.bbandFill = self.ax.fill_between(range(len(self.bbands[0])-1), self.bbands[0][1:], self.bbands[2][1:], facecolor=Colors.bband_fill, interpolate=True)
 
     def setTextPos(self, xpos):
         self.lvlTextPos = xpos
@@ -140,6 +150,7 @@ class PriceChart():
     def initPlot(self, xlims):
         self.xlims = xlims
         self._initHiLoLevels()
+        self._initGrid()
         self._initCandlesticks()
         self._initBBands()
         self.loaded = True
@@ -169,7 +180,8 @@ class PriceChart():
         for bb in self.bbandsPlt:
             if bb != None:
                 bb.set_visible(self.bbandOn)
-        self.drawBBands(update=True)
+            self.bbandFill.set_visible(self.bbandOn)
+        self.drawBBands()
 
     def incCurrIntvl(self, idx):
         # update candlestick chart
@@ -182,7 +194,7 @@ class PriceChart():
 
         # make sure bbands are updated and drawn
         self.updateBBands(update=True)
-        self.drawBBands(update=True)
+        self.drawBBands()
 
     def setXlims(self, xlims, updatemarkers=True):
         self.xlims = xlims
@@ -194,6 +206,7 @@ class PriceChart():
         self.updateHiLevel(hi=hi, lo=lo)
         self.updateLoLevel(hi=hi, lo=lo)
         self.updateFibLevels(hi=hi, lo=lo)
+        self.updateGrid()
 
         return lo, hi
 
@@ -211,10 +224,12 @@ class PriceChart():
         if tempHi != newHi:
             self.updateHiLevel(hi=newHi, lo=newLo)
             self.updateFibLevels(hi=newHi, lo=newLo)
+            self.updateGrid()
             needFullRedraw = True
         if tempLo != newLo:
             self.updateLoLevel(hi=newHi, lo=newLo)
             self.updateFibLevels(hi=newHi, lo=newLo)
+            self.updateGrid()
             needFullRedraw = True
         self.updateBBands()
         self.drawBBands()
@@ -223,9 +238,16 @@ class PriceChart():
 
     def efficientDraw(self, redraw):
         if redraw:
+            if self.bbandOn:
+                self.ax.draw_artist(self.bbandFill)
+                for bband in self.bbandsPlt:
+                    self.ax.draw_artist(bband)
+                    
             if self.fibOn:
                 for fib in self.fibs[0]:
                     self.ax.draw_artist(fib)
+
+            self.ax.draw_artist(self.grid)
             
             # draw all candlesticks in current viewing window (within xlims)
             idx0 = max(0, self.xlims[0])
@@ -240,10 +262,6 @@ class PriceChart():
             # only redraw the newest (live) candle and the bbands
             self.ax.draw_artist(self.candlesticks[0][-1])
             self.ax.draw_artist(self.candlesticks[1][-1])
-
-            if self.bbandOn:
-                for bband in self.bbandsPlt:
-                    self.ax.draw_artist(bband)  
 
     def updateCandlesticks(self, data):
         for i in range(1,5):
@@ -311,7 +329,12 @@ class PriceChart():
         self.loText.set_text("%.2f" % lo)
         self.loText.set_position((self.xlims[1] + self.lvlTextPos, lo))
         buf = (hi - lo) * 0.12
-        self.ax.set_ylim(lo - buf, self.ax.get_ylim()[1])      
+        self.ax.set_ylim(lo - buf, self.ax.get_ylim()[1])
+
+    def updateGrid(self):
+        yticks = self.ax.get_yticks()
+        lines = ([[(x, y) for x in self.xlims] for y in yticks])
+        self.grid.set_paths(lines)        
 
     def updateFibLevels(self, hi=None,lo=None):
         if not self.fibOn: return
@@ -377,12 +400,16 @@ class PriceChart():
         self.bbands[0][-1] = (newMean+newStdev*2)
         self.bbands[1][-1] = (newMean)
         self.bbands[2][-1] = (newMean-newStdev*2)
+        self.bbandsUpdated = True
 
-    def drawBBands(self, update=False):
-        if not self.bbandOn: return
+    def drawBBands(self):
+        if not self.bbandOn or not self.bbandsUpdated: return
         
         for bbp, bb in zip(self.bbandsPlt, self.bbands):
             bbp.set_data(range(len(bb)-1), bb[1:])
+        self.bbandFill.remove()
+        self.bbandFill = self.ax.fill_between(range(len(self.bbands[0])-1), self.bbands[0][1:], self.bbands[2][1:], facecolor=Colors.bband_fill, interpolate=True)
+        self.bbandsUpdated = False
     
         
 class CandlestickChart():
@@ -391,7 +418,7 @@ class CandlestickChart():
         
         numIndicators = len(conf["indicators"])
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.12.0)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v0.12.1)", facecolor=Colors.background)
         self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
             
         # Initialize subplots for price and volume charts
@@ -527,6 +554,7 @@ class CandlestickChart():
             self.fullRedraw = True
         elif event.key == "b":
             self.priceChart.toggleBBand()
+            self.redraw = True
         elif event.key == "s":
             if self.settings == None:
                 self.settings = confDiag()
@@ -1010,7 +1038,7 @@ class CandlestickChart():
                 buyRat += self.volRatio[i] * self.vol[0][i]
             buyRat /= sum([x for x in self.vol[0][startIdx:]])
             
-            xloc = (self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0]
+            xloc = self.xlims[1] - self._pixelsToPoints(50)#(self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0]
             self.volRatioText.set_text("%.1f%%" % (buyRat * 100))
             self.volRatioText.set_position((xloc, maxVol*0.99))
         except Exception as e:

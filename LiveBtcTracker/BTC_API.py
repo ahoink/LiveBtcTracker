@@ -176,8 +176,8 @@ def getIntervals(ex=None):
         intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "6h", "12h", "1d", "1w"]
         
     elif ex == "bitfinex":
-        intervals = ["1m", "5m", "15m", "30m", "1h", "3h", "6h", "12h", "1d", "1w"]
-
+        intervals = ["1m", "5m", "15m", "30m", "1h", "3h", "6h", "12h", "1d"]
+        # 1w is valid
     elif ex == "coinbasepro":
         intervals = ["1m", "5m", "15m", "1h", "6h", "1d"]
 
