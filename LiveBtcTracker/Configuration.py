@@ -3,9 +3,22 @@ from tkinter import filedialog
 import inspect
 import sys
 import gc
+import time
 
 import Indicators
 import BTC_API
+
+class DefaultConfig():
+    params = {
+        "version":"0.13.0",
+        "indicators":"MACD,RSI",
+        "timeFrame":"1h",
+        "enableIdle":0,
+        "showVolBreakdown":0,
+        "showFib":0,
+        "showBBands":0,
+        "viewSize":16
+        }
 
 class SettingsDialog(tk.Frame):
 
@@ -18,6 +31,7 @@ class SettingsDialog(tk.Frame):
 
         self.textColor = "#cecece"
         self.edgeColor = "#6e6e6e"
+        self.saveTimer = -1
 
         self.wheel.addFrame("titleLeft", 80, 10)
         self.wheel.setFrameText("titleLeft", "Indicators", self.textColor)
@@ -32,7 +46,7 @@ class SettingsDialog(tk.Frame):
         self.wheel.setFrameText("titleRight", "Other Settings", self.textColor)
         self.wheel.addFrame("timeFrameLbl", 235, 40)
         self.wheel.setFrameText("timeFrameLbl", "Time Frame", self.textColor)
-        self.wheel.addOptionMenu("timeFrame", 420, 40, BTC_API.getIntervals(), width=3, color="#1e1e1e", textcolor=self.textColor) 
+        self.wheel.addOptionMenu("timeFrame", 415, 40, BTC_API.getIntervals(), width=3, color="#1e1e1e", textcolor=self.textColor) 
         self.wheel.addFrame("idleLbl", 235, 70)
         self.wheel.setFrameText("idleLbl", "Enable Idling", self.textColor)
         self.wheel.addCheckbox("enableIdle", 440, 70)
@@ -45,6 +59,9 @@ class SettingsDialog(tk.Frame):
         self.wheel.addFrame("bbandsLbl", 235, 160)
         self.wheel.setFrameText("bbandsLbl", "Show Bollinger Bands", self.textColor)
         self.wheel.addCheckbox("showBBands", 440, 160)
+        self.wheel.addFrame("viewSize", 235, 190)
+        self.wheel.setFrameText("viewSize", "# of Visible Candles", self.textColor)
+        self.wheel.addUserEntry("viewSize", 440, 190, 3)
 
         self.wheel.addButton("setDefault", "Save as Default", 235, 225, lambda: self.saveConfig("default"))
         self.wheel.setButtonText("setDefault", "Save as Default", color=self.textColor, width=32)
@@ -57,6 +74,7 @@ class SettingsDialog(tk.Frame):
         
 
         # Params
+        self.version = DefaultConfig.params["version"]
         self.origParams = {}
         self.params = {}
         self.origInd = []
@@ -73,6 +91,10 @@ class SettingsDialog(tk.Frame):
         self.params["showVolBreakdown"] = self.wheel.getCheckboxValue("showVolBreakdown")
         self.params["showFib"] = self.wheel.getCheckboxValue("showFib")
         self.params["showBBands"] = self.wheel.getCheckboxValue("showBBands")
+        self.params["viewSize"] = self.wheel.getEntryValue("viewSize")
+        if self.saveTimer != -1 and time.time() - self.saveTimer > 3:
+            self.wheel.setButtonText("setDefault", "Save as Default", color=self.textColor, width=32)
+            self.saveTimer = -1
         self.wheel.update()
         
     def getAllIndicators(self):
@@ -80,18 +102,20 @@ class SettingsDialog(tk.Frame):
         indicators = sorted([x[0] for x in classes[2:]]) # ignore "ABC" and "Indicator" classes
         return ["Add Indicator"] + indicators
 
-    def setConfig(self, tf, idle, vbd, fib, bb):
+    def setConfig(self, tf, idle, vbd, fib, bb, nc):
         self.origParams["timeFrame"] = tf
         self.origParams["enableIdle"] = idle
         self.origParams["showVolBreakdown"] = vbd
         self.origParams["showFib"] = fib
         self.origParams["showBBands"] = bb
+        self.origParams["viewSize"] = nc
         
         self.wheel.setOptionValue("timeFrame", tf)
         self.wheel.setCheckboxValue("enableIdle", idle)
         self.wheel.setCheckboxValue("showVolBreakdown", vbd)
         self.wheel.setCheckboxValue("showFib", fib)
         self.wheel.setCheckboxValue("showBBands", bb)
+        self.wheel.setEntryValue("viewSize", nc)
         self.update()
 
     def loadIndicators(self, indicators):
@@ -142,16 +166,18 @@ class SettingsDialog(tk.Frame):
         self.loadIndicators(None)
 
     def saveConfig(self, name):
+        isDefault = False
         if name == "default":
+            isDefault = True
             name = "..\\Configs\\" + name + ".conf"
         else:
             name = filedialog.asksaveasfilename(initialdir="..\\Configs\\", title="Save as", filetypes=(("config files", "*.conf"), ("all files", "*.*")))
             if name[-5:] != ".conf":
                 name += ".conf"
 
-        writeout = ""
+        writeout = "version=%s\n" % self.version
         # write indicators to config
-        writeout = "Indicators="
+        writeout += "indicators="
         for ind in self.indicators:
             writeout += ind + ","
         writeout = writeout[:-1] + "\n"
@@ -161,12 +187,15 @@ class SettingsDialog(tk.Frame):
         writeout += "enableIdle=%s\n" % self.wheel.getCheckboxValue("enableIdle")
         writeout += "showVolBreakdown=%s\n" % self.wheel.getCheckboxValue("showVolBreakdown")
         writeout += "showFib=%s\n" % self.wheel.getCheckboxValue("showFib")
-        writeout += "showBBands=%s" % self.wheel.getCheckboxValue("showBBands")
+        writeout += "showBBands=%s\n" % self.wheel.getCheckboxValue("showBBands")
+        writeout += "viewSize=%s" % self.wheel.getEntryValue("viewSize")
  
         with open(name, 'w') as f:
             f.write(writeout)
 
-        print("Config saved!")
+        if isDefault:
+            self.wheel.setButtonText("setDefault", "Saved Config!", color=self.textColor, width=32)
+            self.saveTimer = time.time()
             
     def loadConfig(self):
         conf = []
@@ -266,25 +295,30 @@ class Wheel(tk.Frame):
     def addUserEntry(self, identifier, dx, dy, width, command=None):
         if identifier in self.entryDict:
             self.entryDict[identifier].destroy()
-        self.entryDict[identifier] = tk.Entry(self, width=width, validate="key", validatecommand=command)
-        self.entryDict[identifier].place(x=dx, y=dy)
+        var = tk.StringVar(self)
+        self.entryDict[identifier] = (tk.Entry(self, width=width, validate="key", validatecommand=command, textvariable=var), var)
+        self.entryDict[identifier][0].place(x=dx, y=dy)
 
     def getEntryValue(self, identifier):
         if identifier in self.entryDict:
-            return self.entryDict[identifier].get()
+            return self.entryDict[identifier][1].get()
         return None
+
+    def setEntryValue(self, identifier, value):
+        if identifier in self.entryDict:
+            self.entryDict[identifier][1].set(value)
 
     def clearEntry(self, identifier):
         if identifier in self.entryDict:
-            self.entryDict[identifier].delete(0, 'end')
+            self.entryDict[identifier][0].delete(0, 'end')
 
     def disableEntry(self, identifier):
         if identifier in self.entryDict:
-            self.entryDict[identifier].config(state="disabled")
+            self.entryDict[identifier][0].config(state="disabled")
 
     def enableEntry(self, identifier):
         if identifier in self.entryDict:
-            self.entryDict[identifier].config(state="normal")		
+            self.entryDict[identifier][0].config(state="normal")		
 
     def addOptionMenu(self, identifier, dx, dy, options, width=None, command=None, color=None, textcolor=None):
         if identifier in self.optionsDict:

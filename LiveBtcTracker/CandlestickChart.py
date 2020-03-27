@@ -54,6 +54,7 @@ class PriceChart():
         self.ax.set_ylabel("Price (USD)")
         self.ax.set_facecolor(Colors.background)
 
+    # ----- Private Functions ----- #
     def _calcBBfromHist(self, data, histCnt):
         numEx = len(data)
         smaBBandStart = histCnt + 20
@@ -75,21 +76,6 @@ class PriceChart():
         self.bbands[0].append(mean+stdev*2)
         self.bbands[1].append(mean)
         self.bbands[2].append(mean-stdev*2)
-
-    def loadHistory(self, idx, data):
-        self.ohlc.append([idx] + [0]*4)
-        for j in range(1,5):
-            self.ohlc[idx][j] = sum([float(x[j]) for x in data]) / len(data)
-
-        # BBands
-        self.last20 = self.last20[1:] + [self.ohlc[idx][4]]
-        newMean = sum(self.last20) / 20
-        sqSum = sum([(x-newMean)**2 for x in self.last20])
-        newStdev = (sqSum / 20)**0.5
-
-        self.bbands[0].append(newMean+newStdev*2)
-        self.bbands[1].append(newMean)
-        self.bbands[2].append(newMean-newStdev*2)
 
     def _initHiLoLevels(self):           
         maxHi = self.getHighestPrice()
@@ -135,7 +121,7 @@ class PriceChart():
     def _initCandlesticks(self):
         self.candlesticks = [[],[]] #candle(self.axes[0], self.ohlc, width=0.5, colorup=Colors.green, colordown=Colors.red)
         for i in range(len(self.ohlc)):
-            self.createCandlestick(i=i)
+            self._createCandlestick(i=i)
             self.drawCandlesticks(i=i)
 
     def _initBBands(self): 
@@ -144,8 +130,28 @@ class PriceChart():
         self.bbandsPlt[2], = self.ax.plot(range(len(self.bbands[2])-1), self.bbands[2][1:], color=Colors.blue, linewidth=0.6)
         self.bbandFill = self.ax.fill_between(range(len(self.bbands[0])-1), self.bbands[0][1:], self.bbands[2][1:], facecolor=Colors.bband_fill, interpolate=True)
 
-    def setTextPos(self, xpos):
-        self.lvlTextPos = xpos
+    def _createCandlestick(self, i):
+        # create new candlestick and add it to the axis
+        self.candlesticks[0].append(mlines.Line2D([i, i], [0, 0], linewidth=0.5))
+        self.ax.add_line(self.candlesticks[0][-1])
+        self.candlesticks[1].append(mpatches.Rectangle((i - 0.25, 0), width=0.5, height=0))
+        self.ax.add_patch(self.candlesticks[1][-1])
+
+    # ----- Public Functions ----- #
+    def loadHistory(self, idx, data):
+        self.ohlc.append([idx] + [0]*4)
+        for j in range(1,5):
+            self.ohlc[idx][j] = sum([float(x[j]) for x in data]) / len(data)
+
+        # BBands
+        self.last20 = self.last20[1:] + [self.ohlc[idx][4]]
+        newMean = sum(self.last20) / 20
+        sqSum = sum([(x-newMean)**2 for x in self.last20])
+        newStdev = (sqSum / 20)**0.5
+
+        self.bbands[0].append(newMean+newStdev*2)
+        self.bbands[1].append(newMean)
+        self.bbands[2].append(newMean-newStdev*2)
 
     def initPlot(self, xlims):
         self.xlims = xlims
@@ -155,6 +161,23 @@ class PriceChart():
         self._initBBands()
         self.loaded = True
         self.updateFibLevels()
+
+    def incCurrIntvl(self, idx):
+        # update candlestick chart
+        self.ohlc.append([idx] + [0]*4)
+        self.bbands[0].append(self.bbands[0][-1])
+        self.bbands[1].append(self.bbands[1][-1])
+        self.bbands[2].append(self.bbands[2][-1])
+        self.last20 = self.last20[1:] + [0]
+        self._createCandlestick(idx)
+
+        # make sure bbands are updated and drawn
+        self.updateBBands(update=True)
+        self.drawBBands()
+
+    # ----- Attributes, getters/setters ----- #
+    def setTextPos(self, xpos):
+        self.lvlTextPos = xpos
 
     def toggleFib(self, flag=None):
         if flag != None:
@@ -183,19 +206,6 @@ class PriceChart():
             self.bbandFill.set_visible(self.bbandOn)
         self.drawBBands()
 
-    def incCurrIntvl(self, idx):
-        # update candlestick chart
-        self.ohlc.append([idx] + [0]*4)
-        self.bbands[0].append(self.bbands[0][-1])
-        self.bbands[1].append(self.bbands[1][-1])
-        self.bbands[2].append(self.bbands[2][-1])
-        self.last20 = self.last20[1:] + [0]
-        self.createCandlestick(idx)
-
-        # make sure bbands are updated and drawn
-        self.updateBBands(update=True)
-        self.drawBBands()
-
     def setXlims(self, xlims, updatemarkers=True):
         self.xlims = xlims
 
@@ -210,69 +220,26 @@ class PriceChart():
 
         return lo, hi
 
-    def update(self, data, xlims):
-        needFullRedraw = False
-        self.xlims = xlims
+    def getHighestPrice(self):
+        idx = int(max(0, self.xlims[0]))
+        idx2 = int(min(len(self.ohlc), self.xlims[1]))
+        return max([x[2] for x in self.ohlc[idx:idx2]])
 
-        tempHi = self.getHighestPrice()
-        tempLo = self.getLowestPrice()
-        self.updateCandlesticks(data)
-        self.drawCandlesticks()
-        # check if highest or lowest price changed (new data or panning window) and update the markers
-        newHi = self.getHighestPrice()
-        newLo = self.getLowestPrice()
-        if tempHi != newHi:
-            self.updateHiLevel(hi=newHi, lo=newLo)
-            self.updateFibLevels(hi=newHi, lo=newLo)
-            self.updateGrid()
-            needFullRedraw = True
-        if tempLo != newLo:
-            self.updateLoLevel(hi=newHi, lo=newLo)
-            self.updateFibLevels(hi=newHi, lo=newLo)
-            self.updateGrid()
-            needFullRedraw = True
-        self.updateBBands()
-        self.drawBBands()
+    def getLowestPrice(self):
+        idx = int(max(0, self.xlims[0]))
+        idx2 = int(min(len(self.ohlc), self.xlims[1]))
+        return min([x[3] for x in self.ohlc[idx:idx2]])
 
-        return needFullRedraw
-
-    def efficientDraw(self, redraw):
-        if redraw:
-            if self.bbandOn:
-                self.ax.draw_artist(self.bbandFill)
-                for bband in self.bbandsPlt:
-                    self.ax.draw_artist(bband)
-                    
-            if self.fibOn:
-                for fib in self.fibs[0]:
-                    self.ax.draw_artist(fib)
-
-            self.ax.draw_artist(self.grid)
-            
-            # draw all candlesticks in current viewing window (within xlims)
-            idx0 = max(0, self.xlims[0])
-            idx1 = min(self.xlims[1]+1, len(self.candlesticks[0]))
-            if idx1 == len(self.candlesticks[0]): idx1 -= 1
-            for i in range(idx0, idx1):
-                self.ax.draw_artist(self.candlesticks[0][i])
-                self.ax.draw_artist(self.candlesticks[1][i])
-            self.ax.draw_artist(self.hiLine)
-            self.ax.draw_artist(self.loLine)
+    def getCandle(self, idx):
+        if 0 <= idx <= len(self.ohlc):
+            return self.ohlc[idx]
         else:
-            # only redraw the newest (live) candle and the bbands
-            self.ax.draw_artist(self.candlesticks[0][-1])
-            self.ax.draw_artist(self.candlesticks[1][-1])
-
+            print("Invalid candle index")
+    
+    # ----- Update and Draw ----- #
     def updateCandlesticks(self, data):
         for i in range(1,5):
             self.ohlc[-1][i] = sum([float(x[0][i]) for x in data]) / len(data)
-
-    def createCandlestick(self, i):
-        # create new candlestick and add it to the axis
-        self.candlesticks[0].append(mlines.Line2D([i, i], [0, 0], linewidth=0.5))
-        self.ax.add_line(self.candlesticks[0][-1])
-        self.candlesticks[1].append(mpatches.Rectangle((i - 0.25, 0), width=0.5, height=0))
-        self.ax.add_patch(self.candlesticks[1][-1])
         
     def drawCandlesticks(self, i=None):
         if i == None:
@@ -293,23 +260,7 @@ class PriceChart():
                 self.candlesticks[0][i].set_color(Colors.green)
         except Exception as e:
             print("Could not draw candlesticks:", e)
-            
-    def getHighestPrice(self):
-        idx = int(max(0, self.xlims[0]))
-        idx2 = int(min(len(self.ohlc), self.xlims[1]))
-        return max([x[2] for x in self.ohlc[idx:idx2]])
-
-    def getLowestPrice(self):
-        idx = int(max(0, self.xlims[0]))
-        idx2 = int(min(len(self.ohlc), self.xlims[1]))
-        return min([x[3] for x in self.ohlc[idx:idx2]])
-
-    def getCandle(self, idx):
-        if 0 <= idx <= len(self.ohlc):
-            return self.ohlc[idx]
-        else:
-            print("Invalid candle index")
-    
+               
     def updateHiLevel(self, hi=None, lo=None):
         if hi == None: hi = self.getHighestPrice()
         if lo == None: lo = self.getLowestPrice()
@@ -387,7 +338,6 @@ class PriceChart():
         self.fibs[1][4].set_position((self.xlims[1]+self.lvlTextPos, fib78_6))
 
     def updateBBands(self, update=False):
-
         # avoid doing a costly calculation unless the new value is more than one stdev away
         stdev = (self.bbands[0][-1] - self.bbands[1][-1])/2
         if not update and abs(self.ohlc[-1][4] - self.last20[-1]) < stdev: return
@@ -410,15 +360,352 @@ class PriceChart():
         self.bbandFill.remove()
         self.bbandFill = self.ax.fill_between(range(len(self.bbands[0])-1), self.bbands[0][1:], self.bbands[2][1:], facecolor=Colors.bband_fill, interpolate=True)
         self.bbandsUpdated = False
-    
+
+    def update(self, data, xlims):
+        needFullRedraw = False
+        self.xlims = xlims
+
+        tempHi = self.getHighestPrice()
+        tempLo = self.getLowestPrice()
+        self.updateCandlesticks(data)
+        self.drawCandlesticks()
+        # check if highest or lowest price changed (new data or panning window) and update the markers
+        newHi = self.getHighestPrice()
+        newLo = self.getLowestPrice()
+        if tempHi != newHi:
+            self.updateHiLevel(hi=newHi, lo=newLo)
+            self.updateFibLevels(hi=newHi, lo=newLo)
+            self.updateGrid()
+            needFullRedraw = True
+        if tempLo != newLo:
+            self.updateLoLevel(hi=newHi, lo=newLo)
+            self.updateFibLevels(hi=newHi, lo=newLo)
+            self.updateGrid()
+            needFullRedraw = True
+        self.updateBBands()
+        self.drawBBands()
+
+        return needFullRedraw
+
+    def efficientDraw(self, redraw):
+        if redraw:
+            if self.bbandOn:
+                self.ax.draw_artist(self.bbandFill)
+                for bband in self.bbandsPlt:
+                    self.ax.draw_artist(bband)
+                    
+            if self.fibOn:
+                for fib in self.fibs[0]:
+                    self.ax.draw_artist(fib)
+
+            self.ax.draw_artist(self.grid)
+            
+            # draw all candlesticks in current viewing window (within xlims)
+            idx0 = max(0, self.xlims[0])
+            idx1 = min(self.xlims[1]+1, len(self.candlesticks[0]))
+            if idx1 == len(self.candlesticks[0]): idx1 -= 1
+            for i in range(idx0, idx1):
+                self.ax.draw_artist(self.candlesticks[0][i])
+                self.ax.draw_artist(self.candlesticks[1][i])
+            self.ax.draw_artist(self.hiLine)
+            self.ax.draw_artist(self.loLine)
+        else:
+            # only redraw the newest (live) candle and the bbands
+            self.ax.draw_artist(self.candlesticks[0][-1])
+            self.ax.draw_artist(self.candlesticks[1][-1])
+
+
+class VolumeChart():
+    def __init__(self, ax, xlims, coinPair):
+        self.ax = ax
+        self.xlims = xlims
+
+        self.volBars = []                   # stores the rectangle patches for the volume bar graph
+        self.vol = []                       # stores the value of the cumulative volume per period by exchange
+        self.volRatio = []                  # stores the ratio of buys/total for each period
+        self.volRatioText = None            # text object that displays the buy volume ratio of the current viewing window
+        self.buyEma = []                    # values for the EMA of buy volume
+        self.sellEma = []                   # values for the EMA of sell volume
+        self.volEmaPd = 10                  # period for the volume EMAs
+        self.volEmaWt = 2/(self.volEmaPd+1) # weight for the volume EMAs  
+        self.buyEmaPlt = None               # actual plot object for the buy volume EMA
+        self.sellEmaPlt = None              # actual plot object for the sell volume EMA
+        self.showVolBreakdown = False       # Volume bars showing the breakdown by exchange
+        self.legendLabels = []              # list of strings for the legend
+        self.legend = None                  # legend object
+        self.loaded = False
+
+        self.ax.set_ylabel("Volume (%s)" % coinPair)
+        self.ax.set_facecolor(Colors.background)
+
+    # ----- Private Functions ----- #
+    def _calcEMAfromHist(self, data, histCnt):
+        numEx = len(data)
+        emaVolStart = histCnt + self.volEmaPd
+        sumPd = 0
+        sqSum = 0
+        self.buyEma = [0]
+        self.sellEma = [0]
         
+        # First EMA value is a SMA
+        # calculate SMA for first X intervals of emaX
+        for i in range(self.volEmaPd):
+            idx = emaVolStart-1-i
+            totalVol = sum([float(x[idx][5]) for x in data])
+            if len(data[0][idx]) < 10:
+                self.buyEma[0] += totalVol * 0.5
+                self.sellEma[0] += totalVol * 0.5
+            else:
+                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
+                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))         
+            
+        self.buyEma[0] /= self.volEmaPd
+        self.sellEma[0] /= self.volEmaPd
+        
+    def _initVolBars(self):
+        numEx = len(self.vol)
+        self.volBars.append(self.ax.bar(
+                    range(len(self.vol[0])),
+                    self.vol[0],
+                    linewidth=1).patches)
+        if self.showVolBreakdown:
+            for i in range(1,numEx):
+                self.volBars.append(self.ax.bar(
+                    range(len(self.vol[i])),
+                    self.vol[i],
+                    linewidth=0.7).patches)
+                
+        for bar,v,r in zip(self.volBars[0], self.vol[0], self.volRatio):
+            bar.set_height(v)
+            # Highlight bars depending on the ratio of taker buys:sells
+            # Binance is the only exchange that provides this info
+            if r > 0.5:
+                if self.showVolBreakdown:
+                    bar.set_edgecolor(Colors.green)
+                else:
+                    bar.set_color(Colors.green)
+            elif r < 0.5:
+                if self.showVolBreakdown:
+                    bar.set_edgecolor(Colors.red)
+                else:
+                    bar.set_color(Colors.red)
+            else:
+                if self.showVolBreakdown:
+                    bar.set_edgecolor(Colors.blue)
+                else:
+                    bar.set_color(Colors.blue)
+                    
+        if self.showVolBreakdown:
+            for i in range(1, numEx):
+                for bar,v in zip(self.volBars[i], self.vol[i]):
+                    bar.set_height(v)
+
+        self.buyEmaPlt, = self.ax.plot(
+            range(len(self.buyEma)-1), self.buyEma[1:], "-", c=Colors.buyEMA, linewidth=0.9)
+        self.sellEmaPlt, = self.ax.plot(
+            range(len(self.sellEma)-1), self.sellEma[1:], "-", c=Colors.sellEMA, linewidth=0.9)
+
+        self.volRatioText = self.ax.text(0, 0, "", fontsize=9, color=Colors.text)
+
+    def _createBar(self):
+        for i in range(len(self.volBars)):
+            self.volBars[i].append(mpatches.Rectangle((len(self.vol[0])-1 - 0.4, 0), width=0.8, height=0, color=self.volBars[i][-1].get_fc()))
+            self.ax.add_patch(self.volBars[i][-1])
+  
+    # ----- Public Functions ----- #
+    def loadHistory(self, idx, data):
+        numEx = len(data)
+
+        if len(self.vol) == 0:
+            self.vol = [[] for i in range(numEx)]
+            
+        # sum volume from all exchanges
+        for j in range(numEx):           
+            self.vol[j].append( sum([float(x[5]) for x in data[j:]]) )
+
+        # calc buy volume percentage
+        # ignore if binance isn't being tracked, or server is down, or has no volume
+        if len(data[0]) < 10 or float(data[0][5]) == 0:
+            self.volRatio.append(0.5)
+        else:
+            self.volRatio.append( (float(data[0][9]) / float(data[0][5])) )
+
+        # update volume EMAs
+        self.buyEma.append((self.volRatio[idx] * self.vol[0][idx]) * self.volEmaWt +\
+                           self.buyEma[-1] * (1 - self.volEmaWt))
+        self.sellEma.append(((1 - self.volRatio[idx]) * self.vol[0][idx]) * self.volEmaWt +\
+                           self.sellEma[-1] * (1 - self.volEmaWt))
+
+    def initPlot(self, xlims):
+        self.xlims = xlims
+        self._initVolBars()
+        self.setVolumeLegend()
+        self.loaded = True
+
+    def incCurrIntvl(self, idx):
+        for v in self.vol:
+            v.append(0)
+        self.volRatio.append(0)
+        self._createBar()
+        self.buyEma.append(0)
+        self.sellEma.append(0)
+        
+    # ----- Attributes, getters/setters
+    def getVolBar(self, idx, ex=0):
+        return self.vol[ex][idx], self.volRatio[idx]
+
+    def setVol(self, ex, intvl, val):
+        self.vol[ex][intvl] = val
+        if ex == 0:
+            self.volBars[0][intvl].set_height(val)
+        elif self.showVolBreakdown:
+            self.volBars[ex][intvl].set_height(val)
+
+    def getMaxVolume(self, mode):
+        if mode == "window":
+            return max(self.vol[0][max(0, self.xlims[0]):min(len(self.vol[0]), self.xlims[1])])
+        elif mode == "all":
+            return max(self.vol[0])
+        else:
+            return -1
+
+    def setVolBreakdown(self, show):
+        if not self.loaded: self.showVolBreakdown = show; return
+        if show:
+            for bar,r in zip(self.volBars[0], self.volRatio):
+                bar.set_color(Colors.blue)
+                if r > 0.5: bar.set_edgecolor(Colors.green)
+                elif r < 0.5: bar.set_edgecolor(Colors.red)
+            for i in range(1,len(self.vol)):
+                self.volBars.append(self.ax.bar(
+                    range(len(self.vol[i])),
+                    self.vol[i],
+                    linewidth=0.7).patches)
+        elif self.showVolBreakdown:
+            for bar,r in zip(self.volBars[0], self.volRatio):
+                if r > 0.5: bar.set_color(Colors.green)
+                elif r < 0.5: bar.set_color(Colors.red)
+                else: bar.set_color(Colors.blue)
+            for i in range(1,len(self.vol)):
+                for bar in self.volBars[i]:
+                    bar.remove()
+            self.volBars = self.volBars[:1]
+            
+        self.showVolBreakdown = show
+
+    def setVolumeLegend(self, labels=None):
+        if not self.loaded and labels != None: self.legendLabels = labels; return
+        if labels != None:
+            self.legendLabels = labels
+        if self.showVolBreakdown:
+            self.legend = self.ax.legend([x[0] for x in self.volBars], self.legendLabels,
+                                              fancybox=False,
+                                              shadow=False,
+                                              frameon=False,
+                                              loc="lower right")
+            for text in self.legend.get_texts():
+                text.set_color(Colors.text)
+        else:
+            if self.legend != None: self.ax.get_legend().remove()
+
+
+    # ----- Update and Draw ----- #
+    def updateCurrentVol(self, data):
+        numEx = len(data)
+        # bar graph is stacked so each vol is the sum of all vols proceeding it
+        # (i.e. vol[0] is sum of all exchanges, vol[-1] is the volume of a single exchange)
+        for i in range(numEx):
+            self.vol[i][-1] = sum([float(x[0][5]) for x in data[i:]])
+        if len(data[0][0]) < 10 or float(data[0][0][5]) == 0:    # in case binance data isn't included
+            self.volRatio[-1] = 0.5
+        else:
+            self.volRatio[-1] = (float(data[0][0][9]) / float(data[0][0][5]))
+
+        self.buyEma[-1] = (self.volRatio[-1] * self.vol[0][-1]) * self.volEmaWt +\
+                             self.buyEma[-1] * (1 - self.volEmaWt)
+        self.sellEma[-1] = ((1 - self.volRatio[-1]) * self.vol[0][-1]) * self.volEmaWt +\
+                             self.sellEma[-1] * (1 - self.volEmaWt)
+
+    def drawVolBars(self):
+        try:
+            numEx = len(self.vol)
+            self.volBars[0][-1].set_height(self.vol[0][-1])
+            if self.volRatio[-1] > 0.5:
+                if self.showVolBreakdown:
+                    self.volBars[0][-1].set_edgecolor(Colors.green)
+                else:
+                    self.volBars[0][-1].set_color(Colors.green)
+            elif self.volRatio[-1] < 0.5:
+                if self.showVolBreakdown:
+                    self.volBars[0][-1].set_edgecolor(Colors.red)
+                else:
+                    self.volBars[0][-1].set_color(Colors.red)
+            else:
+                if self.showVolBreakdown:
+                    self.volBars[0][-1].set_edgecolor(Colors.blue)
+                else:
+                    self.volBars[0][-1].set_color(Colors.blue)
+                    
+            if self.showVolBreakdown:
+                for i in range(1, numEx):
+                    self.volBars[i][-1].set_height(self.vol[i][-1])
+                
+            # Update y-axis limits to be just above the max volume
+            startIdx = max(0, self.xlims[0])
+            maxVol = max(self.vol[0][startIdx:self.xlims[1]])
+            self.ax.set_ylim(0, maxVol*1.06)
+
+            # Draw EMA lines of buy and sell volume
+            self.buyEmaPlt.set_data(range(len(self.buyEma)-1), self.buyEma[1:])
+            self.sellEmaPlt.set_data(range(len(self.sellEma)-1), self.sellEma[1:])
+
+            # Calculate the percentage of buys from total volume (in current window)
+            buyRat = 0
+            stopIdx = min(self.xlims[1], len(self.vol[0]))
+            for i in range(startIdx, stopIdx):
+                buyRat += self.volRatio[i] * self.vol[0][i]
+            buyRat /= sum([x for x in self.vol[0][startIdx:stopIdx]])
+            
+            xloc = (self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0] #self.xlims[1] - self._pixelsToPoints(50)#(self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0]
+            self.volRatioText.set_text("%.1f%%" % (buyRat * 100))
+            self.volRatioText.set_position((xloc, maxVol*0.99))
+        except Exception as e:
+           print("Could not draw volume chart:", e)
+
+    def update(self, data, xlims):
+        self.xlims = xlims
+        self.updateCurrentVol(data)
+        self.drawVolBars()
+
+    def efficientDraw(self, redraw):
+        if redraw:
+            if self.showVolBreakdown:
+                self.ax.draw_artist(self.legend)
+            idx0 = max(0, self.xlims[0])
+            idx1 = min(self.xlims[1]+1, len(self.volBars[0]))
+            if idx1 == len(self.volBars[0]): idx1 -= 1
+            for i in range(idx0, idx1):
+                self.ax.draw_artist(self.volBars[0][i])
+                if self.showVolBreakdown:
+                    for j in range(1, len(self.volBars)):
+                        self.ax.draw_artist(self.volBars[j][i])
+        else:
+            self.ax.draw_artist(self.volBars[0][-1])
+            if self.showVolBreakdown:
+                for j in range(1, len(self.volBars)):
+                    self.ax.draw_artist(self.volBars[j][-1])
+            self.ax.draw_artist(self.buyEmaPlt)
+            self.ax.draw_artist(self.sellEmaPlt)
+            self.ax.draw_artist(self.volRatioText)
+
+
 class CandlestickChart():
 
     def __init__(self, coinPair, conf):
         
         numIndicators = len(conf["indicators"])
         rcparams["toolbar"] = "None"
-        self.fig = plt.figure("Live BTC Tracker (v0.12.1)", facecolor=Colors.background)
+        self.fig = plt.figure("Live BTC Tracker (v%s)" % conf["version"], facecolor=Colors.background)
         self.fig.set_size_inches(8, 5+(1.5*numIndicators))  # 1.5-inch per indicator
             
         # Initialize subplots for price and volume charts
@@ -449,31 +736,17 @@ class CandlestickChart():
         self.cursorText0 = self.axes[0].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorText1 = self.axes[1].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorOn = False
-        
-        # volume vars
-        self.volBars = []                   # stores the rectangle patches for the volume bar graph
-        self.vol = []                       # stores the value of the cumulative volume per period by exchange
-        self.volRatio = []                  # stores the ratio of buys/total for each period
-        self.volRatioText = None            # text object that displays the buy volume ratio of the current viewing window
-        self.buyEma = []                    # values for the EMA of buy volume
-        self.sellEma = []                   # values for the EMA of sell volume
-        self.volEmaPd = 10                  # period for the volume EMAs
-        self.volEmaWt = 2/(self.volEmaPd+1) # weight for the volume EMAs  
-        self.buyEmaPlt = None               # actual plot object for the buy volume EMA
-        self.sellEmaPlt = None              # actual plot object for the sell volume EMA
-        self.showVolBreakdown = conf["showVolBreakdown"]       # Volume bars showing the breakdown by exchange
-        self.legendLabels = conf["legend"]  # list of strings for the legend
-        self.legend = None                  # legend object
 
         # misc vars
         self.active = False                 # figure is "active" (mouse is on figure)
         self.backgrounds = None             # canvas image for each axis to draw more efficently [blank canvas, canvas with non-changing objects drawn]
         self.currInt = 0                    # index of the current interval
-        self.kill = False
+        self.kill = False                   # application has been closed
         self.enableIdle = conf["enableIdle"]# idling is enabled (updated less often)
         self.fullRedraw = False             # figure and all objects should be completely redrawn
         self.lastMouseX = 0                 # last record x-position of the mouse
         self.loaded = False                 # whether or not history was loaded and drawn
+        self.numCandles = conf["viewSize"]  # number of candles to view at launch
         self.oldData = None                 # original data loaded onto chart
         self.pan = False                    # figure is in panning mode
         self.redraw = True                  # figure should be redrawn efficiently (reload background_0, resave background_1)       
@@ -481,12 +754,17 @@ class CandlestickChart():
         self.settings = None                # settings dialog
         self.timeframe = conf["timeFrame"]  # string of timeframe (e.g. "1h")
         self.timestamps = []                # store epoch timestamps of every interval
-        self.xlims = [100 - 16, 100 + 16]   # bounds of the x-axis
+        self.xlims = [100 - self.numCandles, 100 + self.numCandles]   # bounds of the x-axis
 
         # price chart
         self.priceChart = PriceChart(self.axes[0], self.xlims)
         self.priceChart.toggleFib(conf["showFib"])
         self.priceChart.toggleBBand(conf["showBBands"])
+
+        # volume chart
+        self.volumeChart = VolumeChart(self.axes[1], self.xlims, coinPair)
+        self.volumeChart.setVolBreakdown(conf["showVolBreakdown"])
+        self.volumeChart.setVolumeLegend(conf["legend"])
                   
         # indicators
         self.indicators = []
@@ -504,10 +782,6 @@ class CandlestickChart():
         # Initialize title
         self.title = self.axes[0].text(95, 0.01, "", fontsize=12, color=Colors.text)
 
-        # volume default attributes
-        self.axes[1].set_ylabel("Volume (%s)" % coinPair)
-        self.axes[1].set_facecolor(Colors.background)       
-
         # set axis limits (also affects indicators)
         for ax in self.axes:
             ax.set_xticklabels([])
@@ -518,9 +792,6 @@ class CandlestickChart():
             ax.spines["right"].set_color(Colors.axis)
             ax.tick_params(axis='y', colors=Colors.axis_labels)
             ax.yaxis.label.set_color(Colors.axis_labels)
-
-        # volume breakdown by exchange
-        self.setVolBreakdown(self.showVolBreakdown)
 
     # ----- Event Handlers ----- #
     def _handleClose(self, event):
@@ -559,8 +830,8 @@ class CandlestickChart():
             if self.settings == None:
                 self.settings = confDiag()
                 self.settings.loadIndicators(self.indicators)
-                self.settings.setConfig(self.timeframe, self.enableIdle, self.showVolBreakdown,
-                                        self.priceChart.fibOn, self.priceChart.bbandOn)
+                self.settings.setConfig(self.timeframe, self.enableIdle, self.volumeChart.showVolBreakdown,
+                                        self.priceChart.fibOn, self.priceChart.bbandOn, self.numCandles)
 
     def _mouseClick(self, event):
         self.pan = True
@@ -607,83 +878,16 @@ class CandlestickChart():
             else: cx = event.xdata
             self.cursor.set_xdata([cx, cx])
             self.cursor1.set_xdata([cx, cx])
-            self.cursor1.set_ydata([0, max(self.vol[0])*1.1])
+            self.cursor1.set_ydata([0, self.volumeChart.getMaxVolume("all")*1.1])
             self._updateCursorText(x)
 
         # get which axis was clicked and set the appropriate indicator to active
         axIdx = self.axes.index(event.inaxes)
         for i in range(len(self.indicators)):
             self.indicators[i].active = (axIdx == i+2)
-                
 
 
-    # ----- Private Functions ----- #       
-    def _initVolBars(self):
-        numEx = len(self.vol)
-        self.volBars.append(self.axes[1].bar(
-                    range(self.currInt-len(self.vol[0])+1,self.currInt+1),
-                    self.vol[0],
-                    linewidth=1).patches)
-        if self.showVolBreakdown:
-            for i in range(1,numEx):
-                self.volBars.append(self.axes[1].bar(
-                    range(self.currInt-len(self.vol[i])+1,self.currInt+1),
-                    self.vol[i],
-                    linewidth=0.7).patches)
-                
-        for bar,v,r in zip(self.volBars[0], self.vol[0], self.volRatio):
-            bar.set_height(v)
-            # Highlight bars depending on the ratio of taker buys:sells
-            # Binance is the only exchange that provides this info
-            if r > 0.5:
-                if self.showVolBreakdown:
-                    bar.set_edgecolor(Colors.green)
-                else:
-                    bar.set_color(Colors.green)
-            elif r < 0.5:
-                if self.showVolBreakdown:
-                    bar.set_edgecolor(Colors.red)
-                else:
-                    bar.set_color(Colors.red)
-            else:
-                if self.showVolBreakdown:
-                    bar.set_edgecolor(Colors.blue)
-                else:
-                    bar.set_color(Colors.blue)
-                    
-        if self.showVolBreakdown:
-            for i in range(1, numEx):
-                for bar,v in zip(self.volBars[i], self.vol[i]):
-                    bar.set_height(v)
-
-        self.buyEmaPlt, = self.axes[1].plot(
-            range(self.currInt+1), self.buyEma[1:], "-", c=Colors.buyEMA, linewidth=0.9)
-        self.sellEmaPlt, = self.axes[1].plot(
-            range(self.currInt+1), self.sellEma[1:], "-", c=Colors.sellEMA, linewidth=0.9)
-
-        self.volRatioText = self.axes[1].text(0, 0, "", fontsize=9, color=Colors.text)
-
-    def _calcEMAfromHist(self, data, histCnt):
-        numEx = len(data)
-        emaVolStart = histCnt + self.volEmaPd
-        sumPd = 0
-        sqSum = 0
-        
-        # First EMA value is a SMA
-        # calculate SMA for first X intervals of emaX
-        for i in range(self.volEmaPd):
-            idx = emaVolStart-1-i
-            totalVol = sum([float(x[idx][5]) for x in data])
-            if len(data[0][idx]) < 10:
-                self.buyEma[0] += totalVol * 0.5
-                self.sellEma[0] += totalVol * 0.5
-            else:
-                self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
-                self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))         
-            
-        self.buyEma[0] /= self.volEmaPd
-        self.sellEma[0] /= self.volEmaPd
-
+    # ----- Private Functions ----- #
     def _removeIndicator(self, idx):
         if idx < 0: return
 
@@ -765,9 +969,10 @@ class CandlestickChart():
             self.cursorText0.set_y(
                 self.priceChart.getHighestPrice() + (self.priceChart.getHighestPrice() - self.priceChart.getLowestPrice()) * 0.04)
             self.cursorText0.set_x(self.xlims[0]+0.25)
-            
-            self.cursorText1.set_text("Volume: %.8f (%.1f%% Buys)" % (self.vol[0][x], self.volRatio[x]*100))
-            self.cursorText1.set_y(max(self.vol[0][max(0, self.xlims[0]):min(len(self.vol[0]), self.xlims[1])]))
+
+            tempvol, tempratio = self.volumeChart.getVolBar(x)
+            self.cursorText1.set_text("Volume: %.8f (%.1f%% Buys)" % (tempvol, tempratio*100))
+            self.cursorText1.set_y(self.volumeChart.getMaxVolume("window"))
             self.cursorText1.set_x(self.xlims[0]+0.25)
         else:
             self.cursorText0.set_text("")
@@ -783,8 +988,8 @@ class CandlestickChart():
     def _checkTimestamps(self, data, histCnt):
         numEx = len(data)
         fullHist = min([len(x) for x in data])
-        medT = [x[fullHist-1][0] for x in data][int(numEx/2)]
-        medT2 = [x[fullHist-2][0] for x in data][int(numEx/2)]
+        medT = sorted([x[fullHist-1][0] for x in data])[int(numEx/2)]
+        medT2 = sorted([x[fullHist-2][0] for x in data])[int(numEx/2)]
         gran = medT2 - medT
 
         newData = [[] for x in data]
@@ -805,42 +1010,6 @@ class CandlestickChart():
 
 
     # ----- MPL Figure attribute functions ----- #
-    def setVolBreakdown(self, show):
-        if show:
-            for bar,r in zip(self.volBars[0], self.volRatio):
-                bar.set_color(Colors.blue)
-                if r > 0.5: bar.set_edgecolor(Colors.green)
-                elif r < 0.5: bar.set_edgecolor(Colors.red)
-            for i in range(1,len(self.vol)):
-                self.volBars.append(self.axes[1].bar(
-                    range(self.currInt-len(self.vol[i])+1,self.currInt+1),
-                    self.vol[i],
-                    linewidth=0.7).patches)
-        elif self.showVolBreakdown:
-            for bar,r in zip(self.volBars[0], self.volRatio):
-                if r > 0.5: bar.set_color(Colors.green)
-                elif r < 0.5: bar.set_color(Colors.red)
-                else: bar.set_color(Colors.blue)
-            for i in range(1,len(self.vol)):
-                for bar in self.volBars[i]:
-                    bar.remove()
-            self.volBars = self.volBars[:1]
-            
-        self.showVolBreakdown = show
-
-    def setVolumeLegend(self, labels):
-        self.legendLabels = labels
-        if self.showVolBreakdown:
-            self.legend = self.axes[1].legend([x[0] for x in self.volBars], self.legendLabels,
-                                              fancybox=False,
-                                              shadow=False,
-                                              frameon=False,
-                                              loc="lower right")
-            for text in self.legend.get_texts():
-                text.set_color(Colors.text)
-        else:
-            if self.legend != None: self.axes[1].get_legend().remove()
-
     def setTitle(self, title):
         try:
             if self.enableIdle and not self.active: title += " [IDLE]"
@@ -857,14 +1026,8 @@ class CandlestickChart():
     def loadHistory(self, data, histCnt):
         numEx = len(data)
 
-        # initialize vol list for each exchange
-        for i in range(numEx):
-            self.vol.append([])
-        self.buyEma = [0]
-        self.sellEma = [0]
-
         # calc volume EMAs from history
-        self._calcEMAfromHist(data, histCnt)
+        self.volumeChart._calcEMAfromHist(data, histCnt)
         self.priceChart._calcBBfromHist(data, histCnt)
 
         exDown = [[] for i in range(numEx)]
@@ -888,35 +1051,18 @@ class CandlestickChart():
                 invalid.append(data[0])
                 exDown[0].append(i)
 
-            # sum volume from all exchanges
-            for j in range(numEx):           
-                self.vol[j].append( sum([float(x[idx][5]) for x in data[j:] if x not in invalid]))
-
-            # calc buy volume percentage
-            # ignore if binance isn't being tracked, or server is down, or has no volume
-            if len(data[0][idx]) < 10 or data[0] in invalid or float(data[0][idx][5]) == 0:
-                self.volRatio.append(0.5)
-            else:
-                self.volRatio.append( (float(data[0][idx][9]) / float(data[0][idx][5])) )
-
-            # update volume EMAs
-            self.buyEma.append((self.volRatio[i] * self.vol[0][i]) * self.volEmaWt +\
-                               self.buyEma[-1] * (1 - self.volEmaWt))
-            self.sellEma.append(((1 - self.volRatio[i]) * self.vol[0][i]) * self.volEmaWt +\
-                               self.sellEma[-1] * (1 - self.volEmaWt))
-
-            # load an interval of data (one candle) onto price chart
+            tempData = [x[idx] if x not in invalid else [0]*10 for x in data]
+            self.volumeChart.loadHistory(i, tempData)
+            # load an interval of data (one candle/bar) onto price and volume charts
             tempData = [x[idx] for x in data if x not in invalid]
             self.priceChart.loadHistory(i, tempData)
             
 
         # set axis lims
-        self.xlims = [histCnt - 16, histCnt + 16]
+        self.xlims = [histCnt - self.numCandles, histCnt + self.numCandles]
         for ax in self.axes:
             ax.set_xlim(self.xlims)
         self.priceChart.setXlims(self.xlims, updatemarkers=False)
-        maxVol = max(self.vol[0][max(0, self.xlims[0]):self.xlims[1]])
-        self.axes[1].set_ylim(0, maxVol*1.06)
             
         # "save" backgrounds of axes (before actual data and patches are plotted)
         self.fig.canvas.draw()
@@ -930,12 +1076,12 @@ class CandlestickChart():
         self.currInt = histCnt - 1
         self.priceChart.setTextPos(self._pixelsToPoints(10))
         self.priceChart.initPlot(self.xlims)
-        self._initVolBars()        
+        self.volumeChart.initPlot(self.xlims)     
 
         # Load history for indicators and plot data
         self.oldData = (data, histCnt)
         for ind in self.indicators:
-            ind.loadHistory(self.priceChart.ohlc, data, self.vol[0], histCnt)
+            ind.loadHistory(self.priceChart.ohlc, data, self.volumeChart.vol[0], histCnt)
             ind.initPlot(self.currInt)
 
         # draw everything to start
@@ -948,7 +1094,7 @@ class CandlestickChart():
     def incCurrIntvl(self):
         # update indicators
         for ind in self.indicators:
-            ind.update(self.priceChart.ohlc, self.vol[0], self.currInt, retain=False)
+            ind.update(self.priceChart.ohlc, self.volumeChart.vol[0], self.currInt, retain=False)
 
         # make sure bbands are updated
         self.priceChart.updateBBands(update=True)
@@ -962,110 +1108,24 @@ class CandlestickChart():
             self.priceChart.updateHiLevel()
             self.priceChart.updateLoLevel()
 
+        # update price and volume charts
         self.priceChart.incCurrIntvl(self.currInt)
-        
-        # update volume chart
-        for v in self.vol:
-            v.append(0)
-        self.volRatio.append(0)
-        self.createBar()
-        self.buyEma.append(0)
-        self.sellEma.append(0)
+        self.volumeChart.incCurrIntvl(self.currInt)
 
         # misc updates
         self.timestamps.append([0])
-        self.redraw = True   
-
-
-    # --- Volume related functions --- #
-    def updateCurrentVol(self, data):
-        numEx = len(data)
-        # bar graph is stacked so each vol is the sum of all vols proceeding it
-        # (i.e. vol[0] is sum of all exchanges, vol[-1] is the volume of a single exchange)
-        for i in range(numEx):
-            self.vol[i][self.currInt] = sum([float(x[0][5]) for x in data[i:]])
-        if len(data[0][0]) < 10 or float(data[0][0][5]) == 0:    # in case binance data isn't included
-            self.volRatio[self.currInt] = 0.5
-        else:
-            self.volRatio[self.currInt] = (float(data[0][0][9]) / float(data[0][0][5]))
-
-        self.buyEma[-1] = (self.volRatio[self.currInt] * self.vol[0][self.currInt]) * self.volEmaWt +\
-                             self.buyEma[self.currInt] * (1 - self.volEmaWt)
-        self.sellEma[-1] = ((1 - self.volRatio[self.currInt]) * self.vol[0][self.currInt]) * self.volEmaWt +\
-                             self.sellEma[self.currInt] * (1 - self.volEmaWt)
-
-    def createBar(self):
-        for i in range(len(self.volBars)):
-            self.volBars[i].append(mpatches.Rectangle((self.currInt - 0.4, 0), width=0.8, height=0, color=self.volBars[i][self.currInt-1].get_fc()))
-            self.axes[1].add_patch(self.volBars[i][-1])
-
-    def drawVolBars(self):
-        try:
-            numEx = len(self.vol)
-            self.volBars[0][self.currInt].set_height(self.vol[0][self.currInt])
-            if self.volRatio[self.currInt] > 0.5:
-                if self.showVolBreakdown:
-                    self.volBars[0][self.currInt].set_edgecolor(Colors.green)
-                else:
-                    self.volBars[0][self.currInt].set_color(Colors.green)
-            elif self.volRatio[self.currInt] < 0.5:
-                if self.showVolBreakdown:
-                    self.volBars[0][self.currInt].set_edgecolor(Colors.red)
-                else:
-                    self.volBars[0][self.currInt].set_color(Colors.red)
-            else:
-                if self.showVolBreakdown:
-                    self.volBars[0][self.currInt].set_edgecolor(Colors.blue)
-                else:
-                    self.volBars[0][self.currInt].set_color(Colors.blue)
-                    
-            if self.showVolBreakdown:
-                for i in range(1, numEx):
-                    self.volBars[i][self.currInt].set_height(self.vol[i][self.currInt])
-                
-            # Update y-axis limits to be just above the max volume
-            startIdx = max(0, self.xlims[0])
-            maxVol = max(self.vol[0][startIdx:self.xlims[1]])
-            self.axes[1].set_ylim(0, maxVol*1.06)
-
-            # Draw EMA lines of buy and sell volume
-            self.buyEmaPlt.set_data(range(self.currInt+1), self.buyEma[1:])
-            self.sellEmaPlt.set_data(range(self.currInt+1), self.sellEma[1:])
-
-            # Calculate the percentage of buys from total volume (in current window)
-            buyRat = 0
-            for i in range(startIdx, self.currInt + 1):
-                buyRat += self.volRatio[i] * self.vol[0][i]
-            buyRat /= sum([x for x in self.vol[0][startIdx:]])
-            
-            xloc = self.xlims[1] - self._pixelsToPoints(50)#(self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0]
-            self.volRatioText.set_text("%.1f%%" % (buyRat * 100))
-            self.volRatioText.set_position((xloc, maxVol*0.99))
-        except Exception as e:
-           print("Could not draw volume chart:", e)
-           
-    def setVol(self, ex, intvl, val):
-        self.vol[ex][intvl] = val
-        if ex == 0:
-            self.volBars[0][intvl].set_height(val)
-        elif self.showVolBreakdown:
-            self.volBars[ex][intvl].set_height(val)
-
-    def getVol(self, ex, intvl):
-        return self.vol[ex][intvl]
-
+        self.redraw = True
 
 
     # --- Indicator functions --- #
     def updateIndicators(self, retain=True):
         for ind in self.indicators:
-            ind.update(self.priceChart.ohlc, self.vol[0], self.currInt, retain)
+            ind.update(self.priceChart.ohlc, self.volumeChart.vol[0], self.currInt, retain)
         
     def drawIndicators(self):
         for ind in self.indicators:
             ind.xlims = self.xlims
             ind.draw(self.currInt)
-
 
 
     # --- Draw/show figure functions --- #
@@ -1105,36 +1165,19 @@ class CandlestickChart():
                
         # blit the canvas within the axis bounding box to refresh with the redrawn objects
         self.fig.canvas.blit(self.axes[0].bbox)
-
-        # REPEAT ABOVE PROCESS FOR ALL AXES
         
         # Axis 1 (volume)
         if self.redraw:
             self.fig.canvas.restore_region(self.backgrounds[1][0])
-            if self.showVolBreakdown:
-                self.axes[1].draw_artist(self.legend)
-            idx0 = max(0, self.xlims[0])
-            idx1 = min(self.xlims[1]+1, len(self.volBars[0]))
-            for i in range(idx0, idx1):
-                self.axes[1].draw_artist(self.volBars[0][i])
-                if self.showVolBreakdown:
-                    for j in range(1, len(self.volBars)):
-                        self.axes[1].draw_artist(self.volBars[j][i])
-                if i + 2 == idx1:
-                    self.backgrounds[1][1] = self.fig.canvas.copy_from_bbox(self.axes[1].bbox)
+            self.volumeChart.efficientDraw(True)
+            self.backgrounds[1][1] = self.fig.canvas.copy_from_bbox(self.axes[1].bbox)
         else:
             self.fig.canvas.restore_region(self.backgrounds[1][1])
-            idx = min(self.currInt, self.xlims[1]+1)
-            self.axes[1].draw_artist(self.volBars[0][idx])
-            if self.showVolBreakdown:
-                for j in range(1, len(self.volBars)):
-                    self.axes[1].draw_artist(self.volBars[j][idx])
+        self.volumeChart.efficientDraw(False)
+
         if self.cursorOn:
             self.axes[1].draw_artist(self.cursor1)
             self.axes[1].draw_artist(self.cursorText1)
-        self.axes[1].draw_artist(self.buyEmaPlt)
-        self.axes[1].draw_artist(self.sellEmaPlt)
-        self.axes[1].draw_artist(self.volRatioText)
         self.fig.canvas.blit(self.axes[1].bbox)
 
         # Axis 2+ (indicators)
@@ -1157,9 +1200,9 @@ class CandlestickChart():
         tempfibOn = params["showFib"] == '1'
         tempbbandOn = params["showBBands"] == '1'
 
-        if tempVolBreakdown != self.showVolBreakdown:
-            self.setVolBreakdown(tempVolBreakdown)
-            self.setVolumeLegend(self.legendLabels)
+        if tempVolBreakdown != self.volumeChart.showVolBreakdown:
+            self.volumeChart.setVolBreakdown(tempVolBreakdown)
+            self.volumeChart.setVolumeLegend()
             
         # Update fib levels and bbands as needed
         self.priceChart.toggleFib(tempfibOn)
@@ -1173,7 +1216,7 @@ class CandlestickChart():
             # add and initialize any new indicators
             for ind in self.settings.addedInd:
                 self._addIndicator(ind)
-                self.indicators[-1].loadHistory(self.priceChart.ohlc, self.oldData[0], self.vol[0], self.oldData[1])
+                self.indicators[-1].loadHistory(self.priceChart.ohlc, self.oldData[0], self.volumeChart.vol[0], self.oldData[1])
                 self.indicators[-1].initPlot(self.currInt)
             # remove indicators
             for ind in self.settings.removedInd:
@@ -1190,9 +1233,8 @@ class CandlestickChart():
         # misc updates
         self.timestamps[-1] = data[0][0][0]
 
-        # update volume chart   
-        self.updateCurrentVol(data)
-        self.drawVolBars()
+        # update volume chart
+        self.volumeChart.update(data, self.xlims)
 
         # update price chart
         self.fullRedraw = self.fullRedraw or self.priceChart.update(data, self.xlims)
@@ -1201,8 +1243,15 @@ class CandlestickChart():
         self.updateIndicators()
         self.drawIndicators() 
         
-    def show(self):
+    def show(self, fullscreen=False, pos=0):
+        if fullscreen:
+            mgr = plt.get_current_fig_manager()
+            mgr.window.wm_geometry("+%d+0" % pos)
+            #mgr.window.state("zoomed")
         plt.show(block=False)
+        if fullscreen:
+            mgr.window.state("zoomed")
+            mgr.window.focus()
     
     def refresh(self, fullRedraw=False):
         t0 = time.time()
@@ -1227,6 +1276,7 @@ class CandlestickChart():
         self.fig.canvas.flush_events()
         t1 = time.time()
         return
+        # print timing information
         if self.resaveBG:
             print("Resave BG: %.1f" % ((t1-t0)*1000))
         elif fullRedraw or self.fullRedraw:

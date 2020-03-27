@@ -2,9 +2,11 @@ import time
 import threading
 import argparse
 import os
+import ctypes
 from datetime import datetime, timedelta
 
 from CandlestickChart import CandlestickChart
+from Configuration import DefaultConfig
 import BTC_API as api
 
 def retrieveData():
@@ -102,8 +104,10 @@ def adjustCBPdata(candleData, chart, t):
                     idx = chart.currInt - diff
                     # for each candle, subtract the old vol and add the updated value
                     for j in range(numEx-1):
-                        chart.setVol(j, idx, chart.getVol(j,idx) - chart.getVol(-1,idx) + candleData[-1][i][5])
-                    chart.setVol(-1,idx,candleData[-1][i][5])
+                        vol0,temp = chart.volumeChart.getVolBar(idx,ex=j)
+                        vol1,temp = chart.volumeChart.getVolBar(idx,ex=-1)
+                        chart.volumeChart.setVol(j, idx, vol0 - vol1 + candleData[-1][i][5])
+                    chart.volumeChart.setVol(-1,idx,candleData[-1][i][5])
 
 def checkTimeInterval(t):
     t1 = time.time()
@@ -238,36 +242,59 @@ def loadInitData(chart, HISTORY, t):
             if wasDown:
                 print("\t%s (%d)" % (ex, len(wasDown)))
 
+def saveDefaultConfig(conf):
+    writeout = ""
+    for key in conf:
+        value = conf[key]
+        if isinstance(value, list):
+            value = ",".join(value)
+        if isinstance(value, bool):
+            value = int(value)
+        writeout += "%s=%s\n" % (key, str(value))
+    writeout = writeout[:-1]
+    with open("..\\Configs\\default.conf", 'w') as f:
+        f.write(writeout)
+            
 def getDefaultConfig():
     conf = {}
     conflines = []
-
+    defConf = DefaultConfig.params
+    
     # check if config directory and default config exist, otherwise create them
     if not os.path.isdir("..\\Configs"):
         os.mkdir("..\\Configs")
     if not os.path.isfile("..\\Configs\\default.conf"):
-        writeout = "Indicators=MACD,RSI\n"
-        writeout += "timeFrame=1h\n"
-        writeout += "enableIdle=0\n"
-        writeout += "showVolBreakdown=0\n"
-        writeout += "showFib=0\n"
-        writeout += "showBBands=0"
-        with open("..\\Configs\\default.conf", 'w') as f:
-            f.write(writeout)
+        saveDefaultConfig(defConf)
+        return defConf
             
     # read default config file
     with open("..\\Configs\\default.conf", 'r') as f:
         conflines = f.readlines()
     conflines = [x.replace("\n", "") for x in conflines]
 
-    conf["indicators"] = conflines[0].split('=')[1].split(',')
-    # load other settings
-    for line in conflines[1:]:
+    # load settings by key-value pairs
+    for line in conflines:
         splitted = line.split('=')
-        if len(splitted[1]) > 1:
-            conf[splitted[0]] = splitted[1]
+        key = splitted[0]
+        value = splitted[1] 
+        if len(value) > 1:
+            if value.isdigit(): value = int(value)
+            elif ',' in value: value = value.split(',')
+            conf[key] = value
         else:
-            conf[splitted[0]] = splitted[1] == "1"
+            conf[key] = value == "1"
+
+    # config file is old and may be out-of-date
+    if "version" not in conf or conf["version"] != defConf["version"]:
+        old = False
+        conf["version"] = defConf["version"]
+        for key in defConf:
+            if key not in conf:
+                old = True
+                conf[key] = defConf[key]
+        if old:
+            print("WARNING: Config file does not match current version, auto-updating")
+            saveDefaultConfig(conf)
 
     return conf
 
@@ -283,7 +310,7 @@ def main():
     # ---------- PREPARE TRACKER ---------- #
     # Create chart object that controls all matplotlib related functionality
     chart = CandlestickChart(SYMBOL, CONF)
-    chart.show()
+    chart.show(IS_FULLSCREEN, FIG_POS)
 
     # Most recent interval start time
     t = time.time()
@@ -355,6 +382,7 @@ if __name__ == "__main__":
     parser.add_argument("-y", "--history", help="How many time intervals of history to load at start", required=False, type=int, default=100)
     parser.add_argument("-s", "--symbol", help="The ticker symbol of the coin you want to watch (defaults to BTC)", required=False, default="BTC")
     parser.add_argument("--idle", help="Update the chart much less often", action="store_true")
+    parser.add_argument("--fullscreen", help="Launch the application in fullscreen mode", action="store_true")
     args = vars(parser.parse_args())
 
 
@@ -364,7 +392,8 @@ if __name__ == "__main__":
     HISTORY = args["history"]               # amount of history to load at start
     SYMBOL = args["symbol"].upper()         # the ticker symbol of the asset being tracked
     IS_IDLE = args["idle"]                  # chart only updates when get new data for all exchanges OR user is active on the GUI
-
+    IS_FULLSCREEN = args["fullscreen"]
+    
     # Load default parameters
     CONF = getDefaultConfig()
     if INTERVAL == "NONE":
@@ -386,6 +415,14 @@ if __name__ == "__main__":
     CONF["legend"] = ["Binance", "OKEx", "Bitfinex", "Gemini", "CoinbasePro"]   
     
     # --- arg checks --- #
+    if IS_FULLSCREEN:
+        user32 = ctypes.windll.user32
+        if user32.GetSystemMetrics(78) > user32.GetSystemMetrics(0):
+            FIG_POS = user32.GetSystemMetrics(0)+1
+        else:
+            FIG_POS = 0
+    else:
+        FIG_POS = 0
     if (HISTORY > 1405):
         print("WARNING: Cannot retrieve more than 1405 intervals of history")
         HISTORY = 1405
@@ -462,5 +499,3 @@ if __name__ == "__main__":
     rdy = False
     
     main()
-
-    print("Done.")
