@@ -622,9 +622,9 @@ class VolumeChart():
             self.volRatio[-1] = (float(data[0][0][9]) / float(data[0][0][5]))
 
         self.buyEma[-1] = (self.volRatio[-1] * self.vol[0][-1]) * self.volEmaWt +\
-                             self.buyEma[-1] * (1 - self.volEmaWt)
+                             self.buyEma[-2] * (1 - self.volEmaWt)
         self.sellEma[-1] = ((1 - self.volRatio[-1]) * self.vol[0][-1]) * self.volEmaWt +\
-                             self.sellEma[-1] * (1 - self.volEmaWt)
+                             self.sellEma[-2] * (1 - self.volEmaWt)
 
     def drawVolBars(self):
         try:
