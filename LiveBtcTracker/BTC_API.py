@@ -88,15 +88,16 @@ def getCandle(ex, tint, COIN="BTC", lim=1, start=None, end=None):
     else:
         print("No API for exchange %s" % ex)
         return ret
-               
+
+    ts = time.strftime("%m/%d %H:%M:%S", time.localtime(time.time()))
     try:
         resp = requests.get(url, params=params)
     except:
-        print("An error occured while try to communicate with %s" % ex)
+        print("%s - An error occured while try to communicate with %s" % (ts, ex))
         return ret
 
     if resp.status_code != 200:
-        print("Unable to retrieve data from %s (%d)" % (ex, resp.status_code))
+        print("%s - Unable to retrieve data from %s (%d)" % (ts, ex, resp.status_code))
         return ret
     
     # normalize to consistent timestamps

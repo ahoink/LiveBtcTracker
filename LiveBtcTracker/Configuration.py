@@ -10,7 +10,7 @@ import BTC_API
 
 class DefaultConfig():
     params = {
-        "version":"0.13.0",
+        "version":"0.14.0",
         "indicators":"MACD,RSI",
         "timeFrame":"1h",
         "enableIdle":0,

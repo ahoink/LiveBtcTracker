@@ -202,6 +202,7 @@ class RSI(Indicator):
         self.avgGain = 0
         self.avgLoss = 0
         self.rsi = []
+        self.lastPrice = 0
         self.xlims = xlims
         self.rsiPlot = None
         self.hiThresh = None
@@ -274,6 +275,59 @@ class RSI(Indicator):
             self.avgLoss /= 14
             self.rsi.append(100 - (100 / (1 + (self.avgGain / self.avgLoss))))
 
+    def resetRSItime(self):
+        gains = self.avgGain
+        losses = self.avgLoss
+        startRSI = self.rsi[-1]
+        expectedTime = 0
+
+        avgDiff = 0
+        for i in range(1, len(self.rsi)):
+            avgDiff += abs(self.rsi[i] - self.rsi[i-1])
+        avgDiff /= (len(self.rsi) - 1)
+        candles = int(abs(startRSI - 50) / avgDiff + 0.5)
+
+        lastDiff = startRSI-self.rsi[-2]
+        g_l = 100/((100/(1+gains/losses))-lastDiff)-1
+        if lastDiff < 0:
+            gains = gains*13/14
+            losses = gains/g_l
+        elif lastDiff > 0:
+            losses = losses*13/14
+            gains = losses*g_l
+                
+        gainOrLoss = 0
+        if startRSI > 50: avgDiff *= -1
+        for i in range(candles):
+            g_l = 100/((100/(1+gains/losses))-avgDiff)-1
+            if startRSI > 50:
+                gains = gains*13/14
+                tempL = gains/g_l
+                gainOrLoss -= tempL*14 - 13*losses
+                #print(g_l, gains, tempL, tempL*14 - 13*losses)
+                losses = tempL
+            elif startRSI < 50:
+                losses = losses*13/14
+                tempG = losses*g_l
+                gainOrLoss += tempG*14 - 13*gains
+                gains = tempG
+        return candles, gainOrLoss
+
+        tempRSI = startRSI
+        while (tempRSI > 50 and startRSI > 50) or (tempRSI < 50 and startRSI < 50):
+            if startRSI < 50:
+                gains = (gains * 13 + avgDiff) / 14
+                losses = losses * 13 / 14
+                tempRSI += avgDiff
+            elif startRSI > 50:
+                gains = gains * 13 / 14
+                losses = (losses * 13 + avgDiff) / 14
+                tempRSI -= avgDiff
+            #tempRSI = 100 - (100 / (1 + (gains / losses)))
+            expectedTime += 1
+
+        return expectedTime    
+
     def update(self, ohlc, vol, currInt, retain=True):
         tempGain = 0
         tempLoss = 0
@@ -286,6 +340,7 @@ class RSI(Indicator):
         tempLoss = (self.avgLoss * 13 + tempLoss) / 14
 
         self.rsi[-1] = 100 - (100 / (1 + (tempGain / tempLoss)))
+        self.lastPrice = ohlc[currInt][4]
 
         if not retain:
             self.avgGain = tempGain
@@ -293,11 +348,12 @@ class RSI(Indicator):
             self.rsi.append(0)
 
     def draw(self, currInt):
+        rsit, dp = self.resetRSItime()
         self.rsiPlot.set_data(range(currInt+1), self.rsi)
         self.hiThresh.set_xdata(self.xlims)
         self.loThresh.set_xdata(self.xlims)
-        self.rsiText.set_text("%.2f" % self.rsi[-1])
-        self.rsiText.set_position(((self.xlims[1] - self.xlims[0])*0.94 + self.xlims[0], 88))
+        self.rsiText.set_text("%.2f, %d, %.2f" % (self.rsi[-1], rsit, self.lastPrice+dp))
+        self.rsiText.set_position(((self.xlims[1] - self.xlims[0])*0.82 + self.xlims[0], 88))
 
         if self.active: self.removeX.set_text("[X]")
         else: self.removeX.set_text("")
@@ -339,8 +395,8 @@ class OBV(Indicator):
     def initPlot(self, i):
         self.obvPlt, = self.ax.plot(range(i+1), self.obv, "-", linewidth=0.9)
         self.ax.set_ylim(
-            min(self.obv[self.xlims[0]:min(len(self.obv), self.xlims[1])]),
-            max(self.obv[self.xlims[0]:min(len(self.obv), self.xlims[1])]))
+            min(self.obv[max(self.xlims[0], 0):min(len(self.obv), self.xlims[1])]),
+            max(self.obv[max(self.xlims[0], 0):min(len(self.obv), self.xlims[1])]))
 
     def loadHistory(self, ohlc, data, vol, histCnt):
         # OBV = prev_OBV - Volume     if red candle
