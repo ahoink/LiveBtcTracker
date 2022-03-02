@@ -211,6 +211,10 @@ def isValidSymbol(ex, symbol):
         print("An error occured while try to communicate with %s" % ex)
         return False
 
+    if resp.status_code != 200:
+        print("%s returned status code (%d)" % (ex, resp.status_code))
+        return False
+
     resp = resp.json()
     if ex == "binance":
         temp = [x for x in resp["symbols"] if x["symbol"] == (symbol + "USDT")]
