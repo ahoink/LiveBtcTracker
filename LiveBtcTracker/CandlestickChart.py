@@ -1,6 +1,7 @@
 import time
 import gc
 from matplotlib import rcParams as rcparams
+from matplotlib.backend_bases import MouseButton
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.lines as mlines
@@ -19,6 +20,7 @@ class Colors():
     axis_labels = "#9e9e9e"
     grid_lines = "#5e5e5e"
     fib_levels = "#e5ce46"
+    volEMA = "#dedede"
     buyEMA = "#3333ff"
     sellEMA = "#ffff00"
     bband_fill = "#273146"
@@ -140,8 +142,11 @@ class PriceChart():
     # ----- Public Functions ----- #
     def loadHistory(self, idx, data):
         self.ohlc.append([idx] + [0]*4)
-        for j in range(1,5):
-            self.ohlc[idx][j] = sum([float(x[j]) for x in data]) / len(data)
+        #for j in range(1,5):
+        self.ohlc[idx][1] = sum([float(x[1]) for x in data]) / len(data)
+        self.ohlc[idx][4] = sum([float(x[4]) for x in data]) / len(data)
+        self.ohlc[idx][2] = max([float(x[2]) for x in data])
+        self.ohlc[idx][3] = min([float(x[3]) for x in data])
 
         # BBands
         self.last20 = self.last20[1:] + [self.ohlc[idx][4]]
@@ -178,6 +183,9 @@ class PriceChart():
     # ----- Attributes, getters/setters ----- #
     def setTextPos(self, xpos):
         self.lvlTextPos = xpos
+
+    def getTextPos(self):
+        return self.lvlTextPos
 
     def toggleFib(self, flag=None):
         if flag != None:
@@ -238,8 +246,12 @@ class PriceChart():
     
     # ----- Update and Draw ----- #
     def updateCandlesticks(self, data):
-        for i in range(1,5):
-            self.ohlc[-1][i] = sum([float(x[0][i]) for x in data]) / len(data)
+        #for i in range(1,5):
+        #    self.ohlc[-1][i] = sum([float(x[0][i]) for x in data]) / len(data)
+        self.ohlc[-1][1] = sum([float(x[0][1]) for x in data]) / len(data)
+        self.ohlc[-1][4] = sum([float(x[0][4]) for x in data]) / len(data)
+        self.ohlc[-1][2] = max([float(x[0][2]) for x in data])
+        self.ohlc[-1][3] = min([float(x[0][3]) for x in data])
         
     def drawCandlesticks(self, i=None):
         if i == None:
@@ -424,10 +436,12 @@ class VolumeChart():
         self.vol = []                       # stores the value of the cumulative volume per period by exchange
         self.volRatio = []                  # stores the ratio of buys/total for each period
         self.volRatioText = None            # text object that displays the buy volume ratio of the current viewing window
+        self.volEma = []
         self.buyEma = []                    # values for the EMA of buy volume
         self.sellEma = []                   # values for the EMA of sell volume
-        self.volEmaPd = 10                  # period for the volume EMAs
-        self.volEmaWt = 2/(self.volEmaPd+1) # weight for the volume EMAs  
+        self.volEmaPd = 30                  # period for the volume EMAs
+        self.volEmaWt = 2/(self.volEmaPd+1) # weight for the volume EMAs
+        self.volEmaPlt = None
         self.buyEmaPlt = None               # actual plot object for the buy volume EMA
         self.sellEmaPlt = None              # actual plot object for the sell volume EMA
         self.showVolBreakdown = False       # Volume bars showing the breakdown by exchange
@@ -446,19 +460,22 @@ class VolumeChart():
         sqSum = 0
         self.buyEma = [0]
         self.sellEma = [0]
+        self.volEma = [0]
         
         # First EMA value is a SMA
         # calculate SMA for first X intervals of emaX
         for i in range(self.volEmaPd):
             idx = emaVolStart-1-i
             totalVol = sum([float(x[idx][5]) for x in data])
+            self.volEma[0] += totalVol
             if len(data[0][idx]) < 10:
                 self.buyEma[0] += totalVol * 0.5
                 self.sellEma[0] += totalVol * 0.5
             else:
                 self.buyEma[0] += totalVol * (float(data[0][idx][9]) / float(data[0][idx][5]))
                 self.sellEma[0] += totalVol * (1 - float(data[0][idx][9]) / float(data[0][idx][5]))         
-            
+
+        self.volEma[0] /= self.volEmaPd
         self.buyEma[0] /= self.volEmaPd
         self.sellEma[0] /= self.volEmaPd
         
@@ -500,6 +517,8 @@ class VolumeChart():
                 for bar,v in zip(self.volBars[i], self.vol[i]):
                     bar.set_height(v)
 
+        self.volEmaPlt, = self.ax.plot(
+            range(len(self.volEma)-1), self.volEma[1:], "-", c=Colors.volEMA, linewidth=0.9)
         self.buyEmaPlt, = self.ax.plot(
             range(len(self.buyEma)-1), self.buyEma[1:], "-", c=Colors.buyEMA, linewidth=0.9)
         self.sellEmaPlt, = self.ax.plot(
@@ -531,6 +550,8 @@ class VolumeChart():
             self.volRatio.append( (float(data[0][9]) / float(data[0][5])) )
 
         # update volume EMAs
+        self.volEma.append(self.vol[0][idx] * self.volEmaWt +\
+                            self.volEma[-1] * (1 - self.volEmaWt))
         self.buyEma.append((self.volRatio[idx] * self.vol[0][idx]) * self.volEmaWt +\
                            self.buyEma[-1] * (1 - self.volEmaWt))
         self.sellEma.append(((1 - self.volRatio[idx]) * self.vol[0][idx]) * self.volEmaWt +\
@@ -547,6 +568,7 @@ class VolumeChart():
             v.append(0)
         self.volRatio.append(0)
         self._createBar()
+        self.volEma.append(0)
         self.buyEma.append(0)
         self.sellEma.append(0)
         
@@ -621,6 +643,8 @@ class VolumeChart():
         else:
             self.volRatio[-1] = (float(data[0][0][9]) / float(data[0][0][5]))
 
+        self.volEma[-1] = self.vol[0][-1] * self.volEmaWt +\
+                            self.volEma[-2] * (1 - self.volEmaWt)
         self.buyEma[-1] = (self.volRatio[-1] * self.vol[0][-1]) * self.volEmaWt +\
                              self.buyEma[-2] * (1 - self.volEmaWt)
         self.sellEma[-1] = ((1 - self.volRatio[-1]) * self.vol[0][-1]) * self.volEmaWt +\
@@ -656,6 +680,7 @@ class VolumeChart():
             self.ax.set_ylim(0, maxVol*1.06)
 
             # Draw EMA lines of buy and sell volume
+            self.volEmaPlt.set_data(range(len(self.volEma)-1), self.volEma[1:])
             self.buyEmaPlt.set_data(range(len(self.buyEma)-1), self.buyEma[1:])
             self.sellEmaPlt.set_data(range(len(self.sellEma)-1), self.sellEma[1:])
 
@@ -694,6 +719,7 @@ class VolumeChart():
             if self.showVolBreakdown:
                 for j in range(1, len(self.volBars)):
                     self.ax.draw_artist(self.volBars[j][-1])
+            self.ax.draw_artist(self.volEmaPlt)
             self.ax.draw_artist(self.buyEmaPlt)
             self.ax.draw_artist(self.sellEmaPlt)
             self.ax.draw_artist(self.volRatioText)
@@ -730,11 +756,14 @@ class CandlestickChart():
 
         # Cursor
         self.cursor = mlines.Line2D([-1, -1], [0, 100000], linewidth=1, color=Colors.cursor)
+        self.cursor_horiz = mlines.Line2D([-1, 1000], [0, 0], linewidth=1, color=Colors.cursor)
         self.cursor1 = mlines.Line2D([-1, -1], [0, 100000], linewidth=1, color=Colors.cursor)
         self.axes[0].add_line(self.cursor)
+        self.axes[0].add_line(self.cursor_horiz)
         self.axes[1].add_line(self.cursor1)
         self.cursorText0 = self.axes[0].text(-0.75, 0, "", fontsize=8, color=Colors.text)
         self.cursorText1 = self.axes[1].text(-0.75, 0, "", fontsize=8, color=Colors.text)
+        self.cursorPriceText = self.axes[0].text(0, 0, "", fontsize=9, color=Colors.text)
         self.cursorOn = False
 
         # misc vars
@@ -812,9 +841,11 @@ class CandlestickChart():
                 # adjust cursor and text
                 if self.cursorOn:
                     cx = int(round(event.xdata))
+                    cy = event.ydata
                     self.cursor.set_xdata([cx, cx])
+                    self.cursor_horiz.set_ydata([cy, cy])
                     self.cursor1.set_xdata([cx, cx])
-                    self._updateCursorText(cx)
+                    self._updateCursorText(cx, cy)
                     
                 break
             dx = dx + 1 if dx < 0 else dx - 1
@@ -834,6 +865,7 @@ class CandlestickChart():
                                         self.priceChart.fibOn, self.priceChart.bbandOn, self.numCandles)
 
     def _mouseClick(self, event):
+        if event.button == MouseButton.RIGHT: return
         self.pan = True
         self.lastMouseX = event.x
 
@@ -855,7 +887,9 @@ class CandlestickChart():
         self.cursorOn = False
         self.cursorText0.set_text("")
         self.cursorText1.set_text("")
+        self.cursorPriceText.set_text("")
         self.cursor.set_xdata([-1, -1])
+        self.cursor_horiz.set_ydata([0, 0])
         self.cursor1.set_xdata([-1, -1])
 
         self.pan = False
@@ -874,12 +908,16 @@ class CandlestickChart():
         if self.cursorOn:
             x = int(round(event.xdata))
             # cursor is within bounds of candlestick data - round to nearest interval
-            if 0 <= x <= self.currInt: cx = x
-            else: cx = event.xdata
+            if 0 <= x <= self.currInt:
+                cx = x
+            else:
+                cx = event.xdata
+            cy = event.ydata
             self.cursor.set_xdata([cx, cx])
+            self.cursor_horiz.set_ydata([cy, cy])
             self.cursor1.set_xdata([cx, cx])
             self.cursor1.set_ydata([0, self.volumeChart.getMaxVolume("all")*1.1])
-            self._updateCursorText(x)
+            self._updateCursorText(x, cy)
 
         # get which axis was clicked and set the appropriate indicator to active
         axIdx = self.axes.index(event.inaxes)
@@ -959,7 +997,7 @@ class CandlestickChart():
             self.fullRedraw = True
         self.redraw = True           
 
-    def _updateCursorText(self, x):
+    def _updateCursorText(self, x, y):
         if 0 <= x <= self.currInt:
             timeStr = time.strftime("%d %b %Y %H:%M", time.localtime(self.timestamps[x]))
             tempCandle = self.priceChart.getCandle(x)
@@ -977,6 +1015,11 @@ class CandlestickChart():
         else:
             self.cursorText0.set_text("")
             self.cursorText1.set_text("")
+
+        price_text = "%.2f" % y
+        text_xpos = self.xlims[1] - self._pixelsToPoints(10 * (len(price_text)-1))
+        self.cursorPriceText.set_text(price_text)
+        self.cursorPriceText.set_position((text_xpos, y*1.01))
 
     def _getPlotWidthPixels(self):
         # (figure width in inches * dots/inch) * plot takes up 77.4% of the figure width = plot width in pixels
@@ -1023,6 +1066,9 @@ class CandlestickChart():
 
 
     # ----- Only run at startup ----- #
+    def historyNeeded(self):
+        return max(26 + 9, self.volumeChart.volEmaPd)
+        
     def loadHistory(self, data, histCnt):
         numEx = len(data)
 
@@ -1161,7 +1207,9 @@ class CandlestickChart():
         self.axes[0].draw_artist(self.title)
         if self.cursorOn:
             self.axes[0].draw_artist(self.cursor)
+            self.axes[0].draw_artist(self.cursor_horiz)
             self.axes[0].draw_artist(self.cursorText0)
+            self.axes[0].draw_artist(self.cursorPriceText)
                
         # blit the canvas within the axis bounding box to refresh with the redrawn objects
         self.fig.canvas.blit(self.axes[0].bbox)
