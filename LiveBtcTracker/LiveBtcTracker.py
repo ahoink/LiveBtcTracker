@@ -206,7 +206,7 @@ def loadInitData(chart, HISTORY, t):
 
     candleData = []
     failed = []
-    histPlusEMAPd = HISTORY + 26 + 9 # account for EMA26 and SMA9 of the EMA26 and EMA12 for MACD
+    histPlusEMAPd = HISTORY + chart.historyNeeded()#26 + 9 # account for EMA26 and SMA9 of the EMA26 and EMA12 for MACD
     for i in range(numEx):
         # retrieve history of candle data
         temp = api.getCandle(exchanges[i], INTERVAL, SYMBOL, histPlusEMAPd)
