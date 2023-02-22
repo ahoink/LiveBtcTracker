@@ -51,7 +51,3 @@ I plan do eventually add the following (no specific order)
 
 Also, it turns out matplotlib isn't great for real-time plotting. At some point I may decided to switch to a different library.
 
-## Donations/Tips
-appreciated but not required :)
-
-BTC:  1Kbq4egRfRCioRWGkFgZkJAxuzCQxqsEoU
